@@ -1,11 +1,12 @@
 {
   "name": "cypress-saucelabs",
-  "version": "1.0.0",
+  "version": "7.1.0",
   "description": "Run Cypress tests on Sauce Labs cloud",
-  "main": "main.js",
+  "main": "cypress-saucelabs.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "bin": "cypress-saucelabs",
   "keywords": [
     "cypress",
     "tests",
@@ -14,5 +15,9 @@
     "saucelabs"
   ],
   "author": "Dan Graham",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "cypress": "7.1.0",
+    "yargs": "17.0.1"
+  }
 }
