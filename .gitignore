@@ -1,1 +1,4 @@
 node_modules/
+__$$cypress-saucelabs$$__.json
+sauce-runner.json
+__assets__

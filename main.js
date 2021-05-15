@@ -23,12 +23,6 @@ Runs Cypress tests in the Sauce Labs cloud
         type: 'string',
         description: 'your Sauce Labs access key. you can omit this if you set a SAUCE_ACCESS_KEY environment variable',
       })
-      .option('sauce-browsers', {
-        type: 'string',
-        description: `a comma-separted list of Sauce Labs browsers to run your Cypress tests on.
-
-example: "--sauce-browsers chrome, firefox:78:windows , edge:latest:windows"`
-      })
       .option('sauce-local', {
         type: 'boolean',
         description: `run your Cypress test locally and send the results to Sauce Labs`,
@@ -40,7 +34,13 @@ example: "--sauce-browsers chrome, firefox:78:windows , edge:latest:windows"`
       .option('browser', {
         alias: 'b',
         type: 'string',
-        description: `runs Cypress in the browser with the given name. if a filesystem path is supplied, Cypress will attempt to use the browser at that path.`
+        description: `a comma-separted list of Sauce Labs browsers to run your Cypress tests on.
+
+        Each browser has the format "<browserName>:<browserVersion>:<operatingSystem>:<screenResolution>". 
+
+        'browserName' is the only required field
+
+        example: "--browsers chrome, firefox:78:windows , edge:latest:windows:1920x1078"`
       })
       .option('ci-build-id', {
         type: 'string',
@@ -136,15 +136,15 @@ example: "--sauce-browsers chrome, firefox:78:windows , edge:latest:windows"`
 
 function run (argv) {
     let {
-        sauceUsername,
-        sauceAccessKey,
-        sauceBrowsers,
-        sauceLocal,
-        config = '',
-        configFile = './cypress.json',
-        env = '',
-        ciBuildId,
-        browser,
+      sauceUsername,
+      sauceAccessKey,
+      sauceLocal,
+      project,
+      config = '',
+      configFile = './cypress.json',
+      env = '',
+      ciBuildId,
+      browser = 'chrome',
     } = argv;
 
     let {
@@ -165,46 +165,48 @@ function run (argv) {
         `paste your Access Key and provide it in the command: "--sauce-access-key YOUR_ACCESS_KEY"`);
     }
 
-    if (sauceLocal) {
-        // TODO: Run Cypress binary here
-        return;
-    }
+    // TODO: Generate a sauceignore here if none exists
+
+    const workingDir = process.cwd();
 
     const sauceBrowserList = [];
-    for (const browser of sauceBrowsers.split(',')) {
-        let [browserName, browserVersion, os] = browser.trim().split(':');
-        sauceBrowserList.push([
-        browserName, browserVersion || 'latest', os || 'Windows',
-        ]);
-        // TODO: Verify the browser names, versions and platforms
+    for (const browserInfo of browser.split(',')) {
+      let [browserName, browserVersion, os, screenResolution] = browserInfo.trim().split(':');
+      sauceBrowserList.push([
+        browserName,
+        browserVersion || '',
+        os || 'Windows',
+        screenResolution,
+      ]);
+      // TODO: Validate the browser names, versions and platforms
     }
 
-    // Configs
+    // GENERATE CYPRESS CONFIG
     let cypressConfig = {};
 
     if (configFile != 'false') {
-        const pathToConfig = path.join(process.cwd(), configFile);
-        if (!fs.existsSync(pathToConfig)) {
+      const pathToConfig = path.join(workingDir, project, configFile);
+      if (!fs.existsSync(pathToConfig)) {
         throw new Error(`Could not find a Cypress configuration file, exiting.
 
-We looked but did not find a FARTIEPANTS.json file in this folder: /Users/danielgraham/personal/cypress-saucelabs`);
-        }
-        try {
-        cypressConfig = {...cypressConfig, ...JSON.parse(require(pathToConfig))};
-        } catch (e) {
+We looked but did not find a ${pathToConfig} file in this folder: /Users/danielgraham/personal/cypress-saucelabs`);
+      }
+      try {
+        cypressConfig = {...cypressConfig, ...require(pathToConfig)};
+      } catch (e) {
         throw new Error(`Cypress config file at '${pathToConfig}' contains invalid JSON: ${e.message}`);
-        }
+      }
     }
 
     for (const keyValuePair of config.trim().split(',')) {
-        if (keyValuePair === '') continue;
-        const [configKey, configValue] = keyValuePair.split('=');
-        if (!configValue) {
+      if (keyValuePair === '') continue;
+      const [configKey, configValue] = keyValuePair.split('=');
+      if (!configValue) {
         throw new Error(`Encountered an error while parsing the argument 'config'.
         
 You passed: '${keyValuePair}'. Must provide a key and value separated by = sign`);
-        }
-        cypressConfig[configKey] = configValue;
+      }
+      cypressConfig[configKey] = configValue;
     }
 
     // ENVIRONMENT VARIABLES
@@ -212,56 +214,104 @@ You passed: '${keyValuePair}'. Must provide a key and value separated by = sign`
 
     const pathToCypressEnv = path.join(process.cwd(), 'cypress.env.json');
     if (fs.existsSync(pathToCypressEnv)) {
-        try {
+      try {
         cypressEnv = {...cypressEnv, ...JSON.parse(require(pathToCypressEnv))};
-        } catch (e) {
+      } catch (e) {
         throw new Error(`Cypress env file at '${pathToCypressEnv}' contains invalid JSON: ${e.message}`);
-        }
+      }
     }
 
     for (const envPair of env.trim().split(',')) {
-        if (envPair === '') continue;
-        const [envKey, envValue] = envPair.split('=');
-        if (!envValue) {
+      if (envPair === '') continue;
+      const [envKey, envValue] = envPair.split('=');
+      if (!envValue) {
         throw new Error(`Encountered an error while parsing the argument 'env'.
         
 You passed: '${envPair}'. Must provide a key and value separated by = sign`);
-        }
-        cypressEnv[envKey] = envValue; 
+      }
+      cypressEnv[envKey] = envValue; 
     }
+
+    cypressConfig.env = {...cypressConfig.env, ...cypressEnv};
+
+    // WRITE CYPRESS CONFIG TO JSON FILE
+    const cypressFileName = `__$$cypress-saucelabs$$__.json`;
+    const cypressFilePath = path.join(workingDir, cypressFileName);
+    fs.writeFileSync(cypressFilePath, JSON.stringify(cypressConfig, null, 2));
 
     if (!ciBuildId) {
-        // TODO: Auto-detect the CI build ID
+      // TODO: Auto-detect the CI build ID
+      ciBuildId = `Build -- ${+ new Date()}`;
     }
 
-    if (browser) {
-        console.warn(`Found 'browser=${browser}'. This parameter is not used in Sauce Cloud and will be ignored. Use --sauce-browser instead.`)
-    }
+    // CREATE SAUCE-RUNNER.JSON
+    const sauceRunnerJson = {
+      apiVersion: 'v1alpha',
+      kind: 'cypress',
+      sauce: {
+        metadata: {
+          name: 'Test Name', // TODO: Add a general test name
+          tags: [
+            'cypress-saucelabs',
+            // TODO: Add user defined tags here
+          ],
+          build: ciBuildId,
+        },
+        region: 'us-west-1', // TODO: Let user decide region here
+      },
+      cypress: {
+        configFile: cypressFilePath,
+        version: defaultCypressVersion,
+      },
+      suites: sauceBrowserList.map(([browserName, browserVersion, os, screenResolution]) => {
+        return {
+          name: `${browserName} -- ${browserVersion} -- ${os}` + (screenResolution ? ` -- ${screenResolution}` : ''),
+          browser: browserName,
+          browserVersion,
+          screenResolution,
+          config: {},
+        };
+      }),
+    };
+    fs.writeFileSync(path.join(workingDir, 'sauce-runner.json'), JSON.stringify(sauceRunnerJson, null, 2));
 
+    // TODO: Add Winston logging
+
+    // Warn about permanently unsupported Cypress parameters
     const unsupportedParameters = ['tag', 'spec', 'reporterOptions', 'reporter', 'quiet', 'noExit', 'headless', 'headed', 'group'];
     for (const parameter of unsupportedParameters) {
-        if (argv[parameter]) {
+      if (argv[parameter]) {
         console.warn(`Found parameter '${parameter}=${argv[parameter]}'. '${parameter}' is not used in Sauce Labs cloud and will be ignored`);
-        }
+      }
     }
 
+    // Give a link to Aha! for unsupported 
     if (argv.parallel) {
-        console.warn(`'parallel' parameter is not supported in Sauce cloud. If you'd like to see this, open an issue at https://saucelabs.ideas.aha.io/`);
+      console.warn(`'parallel' parameter is not supported in Sauce cloud. If you'd like to see this, request it at https://saucelabs.ideas.aha.io/`);
     }
 
-    // TODO: Check how many minutes the user has, if they're a free user and give a CTA to upgrade
+    if (sauceLocal) {
+      // TODO: Add local mode that runs "sauce-cypress-runner"
+    } else {
+      // ZIP THE PROJECT
+      // TODO: Create the zip file (ignore .sauceignore, cypress.json, cypress.env.json; add .sauce-runner.json, cypress-<UNIQUE-HASH>.json)
 
-    // TODO: Construct sauce-runner.json
+      // TODO: Check how many minutes the user has, if they're a free user and give a CTA to upgrade
 
-    // TODO: Create the zip file (ignore .sauceignore, cypress.json, cypress.env.json; add .sauce-runner.json, cypress-<UNIQUE-HASH>.json)
+      // TODO: Upload the zip file to App Storage
 
-    // TODO: Upload the zip file to App Storage
+      // TODO: Add sauce-connect tunnel automator. Check users Cypress to see if using 'localhost' and recommend they use 'sauce-tunnel'
 
-    // TODO: Add sauce-connect tunnel automator. Check users Cypress to see if using 'localhost' and recommend they use 'sauce-tunnel'
-
-    // TODO: Run the test using TestComposer
-    
+      // TODO: Run the test using TestComposer
+    }
+      
     console.log('#####RUNNING CLOUD TESTS NOW', sauceBrowserList, cypressConfig, cypressEnv, ciBuildId);
   }
+
+  // TODO: Add linting
+  // TODO: Add Jest unit test
+  // TODO: Add Jest E2E test
+  // TODO: Add publishing script
+  // TODO: Add GitHub Actions
 
   module.exports = run;
