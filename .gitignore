@@ -1,4 +1,7 @@
 node_modules/
 __$$cypress-saucelabs$$__.json
+__$$cypress-saucelabs$$__.zip
+.DS_Store
 sauce-runner.json
 __assets__
+__$$cypress-saucelabs$$__

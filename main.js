@@ -3,6 +3,8 @@ const path = require('path');
 const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');
 const fs = require('fs');
+const ignore = require('ignore');
+const AdmZip = require('adm-zip');
 
 const defaultCypressVersion = require('./package.json').version;
 
@@ -139,7 +141,7 @@ function run (argv) {
       sauceUsername,
       sauceAccessKey,
       sauceLocal,
-      project,
+      project = './',
       config = '',
       configFile = './cypress.json',
       env = '',
@@ -236,7 +238,7 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
 
     // WRITE CYPRESS CONFIG TO JSON FILE
     const cypressFileName = `__$$cypress-saucelabs$$__.json`;
-    const cypressFilePath = path.join(workingDir, cypressFileName);
+    const cypressFilePath = path.join(workingDir, project, cypressFileName);
     fs.writeFileSync(cypressFilePath, JSON.stringify(cypressConfig, null, 2));
 
     if (!ciBuildId) {
@@ -260,12 +262,12 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
         region: 'us-west-1', // TODO: Let user decide region here
       },
       cypress: {
-        configFile: cypressFilePath,
-        version: defaultCypressVersion,
+        configFile: path.relative(workingDir, cypressFilePath),
+        version: defaultCypressVersion, // TODO: Allow user to set Cypress version
       },
       suites: sauceBrowserList.map(([browserName, browserVersion, os, screenResolution]) => {
         return {
-          name: `${browserName} -- ${browserVersion} -- ${os}` + (screenResolution ? ` -- ${screenResolution}` : ''),
+          name: `${browserName} -- ${browserVersion || 'latest'} -- ${os}` + (screenResolution ? ` -- ${screenResolution}` : ''),
           browser: browserName,
           browserVersion,
           screenResolution,
@@ -290,13 +292,40 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
       console.warn(`'parallel' parameter is not supported in Sauce cloud. If you'd like to see this, request it at https://saucelabs.ideas.aha.io/`);
     }
 
-    if (sauceLocal) {
-      // TODO: Add local mode that runs "sauce-cypress-runner"
-    } else {
-      // ZIP THE PROJECT
-      // TODO: Create the zip file (ignore .sauceignore, cypress.json, cypress.env.json; add .sauce-runner.json, cypress-<UNIQUE-HASH>.json)
+    // TODO: Add a cleanup task to remove artifacts
 
+    if (sauceLocal) {
+      // TODO: Add local mode that runs "sauce-cypress-runner" (need to publish "sauce-cypress-runner" to NPM)
+    } else {
       // TODO: Check how many minutes the user has, if they're a free user and give a CTA to upgrade
+
+      // ZIP THE PROJECT
+      const zipFileOut = '__$$cypress-saucelabs$$__.zip';
+      const ig = ignore()
+        .add(['.sauceignore', '.git', zipFileOut])
+        .add(fs.readFileSync(path.join(workingDir, '.sauceignore')).toString());
+      let filenames = [];
+      (function recursiveReaddirSync (dir) {
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          try {
+            if ( fs.lstatSync(path.join(dir, file)).isDirectory() ) {
+              recursiveReaddirSync(path.join(dir, file));
+            } else {
+              filenames.push(path.relative(workingDir, path.join(dir, file)));
+            }
+          } catch (ign) { }
+        }
+      })(workingDir);
+      filenames = ig.filter(filenames);
+
+      const zip = new AdmZip();
+      for (const filename of filenames) {
+        const absoluteFilePath = path.join(workingDir, filename);
+        const relativeFilePath = path.relative(workingDir, absoluteFilePath);
+        zip.addLocalFile(absoluteFilePath, path.dirname(relativeFilePath), path.basename(relativeFilePath));
+      }
+      zip.writeZip(zipFileOut);
 
       // TODO: Upload the zip file to App Storage
 
@@ -313,5 +342,6 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
   // TODO: Add Jest E2E test
   // TODO: Add publishing script
   // TODO: Add GitHub Actions
+  // TODO: NPM Package command line variable
 
   module.exports = run;

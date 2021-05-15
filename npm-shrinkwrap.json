@@ -113,6 +113,11 @@
       "integrity": "sha1-/14vGQKWnTBSJaBHyKD9XJFc6+8=",
       "dev": true
     },
+    "adm-zip": {
+      "version": "0.5.5",
+      "resolved": "https://registry.npmjs.org/adm-zip/-/adm-zip-0.5.5.tgz",
+      "integrity": "sha512-IWwXKnCbirdbyXSfUDvCCrmYrOHANRZcc8NcRrvTlIApdl7PwE9oGcsYvNeJPAVY1M+70b4PxXGKIf8AEuiQ6w=="
+    },
     "ajv": {
       "version": "6.12.6",
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/ajv/-/ajv-6.12.6.tgz",
@@ -876,6 +881,11 @@
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/human-signals/-/human-signals-1.1.1.tgz",
       "integrity": "sha1-xbHNFPUK6uCatsWf5jujOV/k36M=",
       "dev": true
+    },
+    "ignore": {
+      "version": "5.1.8",
+      "resolved": "https://registry.npmjs.org/ignore/-/ignore-5.1.8.tgz",
+      "integrity": "sha512-BMpfD7PpiETpBl/A6S498BaIJ6Y/ABT93ETbby2fP00v4EbvPBXWEoaR1UBPKs3iR53pJY7EtZk5KACI57i1Uw=="
     },
     "indent-string": {
       "version": "3.2.0",
