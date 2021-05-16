@@ -41,6 +41,11 @@ Runs Cypress tests in the Sauce Labs cloud
         type: 'number',
         description: `max number of jobs to run concurrently`
       })
+      .option('sauce-region', {
+        alias: ['region'],
+        type: 'string',
+        description: `data center to run tests from. Can be US (United States) or EU (Europe)`,
+      })
       .option('browser', {
         alias: 'b',
         type: 'string',
@@ -151,6 +156,7 @@ async function run (argv) {
       sauceLocal,
       sauceCypressVersion,
       sauceConcurrency = 2,
+      sauceRegion,
       project = './',
       config = '',
       configFile = './cypress.json',
@@ -177,6 +183,41 @@ async function run (argv) {
         `paste your Access Key and provide it in the command: "--sauce-access-key YOUR_ACCESS_KEY"`);
     }
 
+    // Determine region to run tests
+    let region = 'us-west-1';
+    if (sauceRegion === 'us' || sauceRegion === 'us-west-1') {
+      region = 'us-west-1';
+    } else if (sauceRegion === 'eu' || sauceRegion === 'eu-central-1') {
+      region = 'eu-central-1';
+    } else if (sauceRegion === 'staging') {
+      region = 'staging';
+    } else if (sauceRegion) {
+      throw new Error(`Unsupported region ${sauceRegion}`);
+    }
+    let sauceUrl = `https://${SAUCE_USERNAME}:${SAUCE_ACCESS_KEY}@api.${region}.saucelabs.com`;
+    if (region === 'staging') {
+      sauceUrl = `https://${SAUCE_USERNAME}:${SAUCE_ACCESS_KEY}@api.${region}.saucelabs.net`;
+    }
+    
+    // Look at the users info
+    const userUrl = `${sauceUrl}/rest/v1/users/${SAUCE_USERNAME}`;
+    const { user_type:userType, concurrency_limit:concurrencyLimit } = (await axios.get(userUrl)).data;
+    if (userType === 'free') {
+      console.error(`Your Sauce Labs account ${SAUCE_USERNAME} has expired. ` +
+        `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
+    }
+    if (userType === 'free' || userType === 'free_trial' || userType === 'freemium') {
+      // TODO: Add a log message saying they're using a free version and give a call to action to upgrade
+    }
+
+    const maxConcurrency = concurrencyLimit.overall;
+    if (maxConcurrency < sauceConcurrency) {
+      console.warn(`You chose a concurrency limit of ${sauceConcurrency} but your account only provides ${maxConcurrency}. ` +
+        `Setting concurrency to ${maxConcurrency}` + 
+        `To increase your concurrency visit https://app.saucelabs.com/billing/plans to upgrade your account`);
+      sauceConcurrency = maxConcurrency;
+    }
+
     // TODO: Generate a sauceignore here if none exists
 
     const workingDir = process.cwd();
@@ -192,9 +233,6 @@ async function run (argv) {
       ]);
       // TODO: Validate the browser names, versions and platforms
     }
-
-    // Determine region to run tests
-    let region = 'us-west-1'; // TODO: Let users be able to set their region
 
     // GENERATE CYPRESS CONFIG
     let cypressConfig = {};
@@ -341,8 +379,6 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
       }
       zip.writeZip(zipFileOut);
 
-      const sauceUrl = `https://${SAUCE_USERNAME}:${SAUCE_ACCESS_KEY}@api.${region}.saucelabs.com`;
-
       // Upload the zip file to Application Storage
       const zipFileStream = fs.createReadStream(zipFileOut);
       const formData = new FormData();
@@ -358,7 +394,7 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
 
       // Run the tests via testcomposer
       async function runJob (suite) {
-        // TODO: Introduce a 
+        // TODO: Introduce a way to retry job
         const { name } = suite;
         const testComposerBody = {
           username: sauceUsername,
@@ -376,7 +412,6 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
           frameworkVersion: sauceRunnerJson.cypress.version,
         };
         const response = await axios.post(`${sauceUrl}/v1/testcomposer/jobs`, testComposerBody);
-        // TODO: Poll waiting for this job
         // TODO: Add a timeout option (right now it's just 30 minutes);
         const passed = await retryInterval(4 * 30, 15000, async function () {
           const resp = await axios.get(`${sauceUrl}/rest/v1/${SAUCE_USERNAME}/jobs/${response.data.jobID}`);
