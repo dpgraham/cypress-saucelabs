@@ -18,3 +18,10 @@ cypress-saucelabs
 * Add these files, plus all files in the root, minus what is defined in ".sauceignore"
 
 # USABILITY
+
+# EXAMPLES
+* monorepo
+* viewports
+* screen-resolutions
+* cross-browser
+* 

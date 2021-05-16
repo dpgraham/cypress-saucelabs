@@ -7,9 +7,12 @@ const ignore = require('ignore');
 const AdmZip = require('adm-zip');
 const FormData = require('form-data');
 const { retryInterval } = require('asyncbox');
+const { logger } = require('appium-support');
 
 const defaultCypressVersion = require('../package.json').version;
 const { default: axios } = require('axios');
+
+const log = logger.getLogger();
 
 yargs(hideBin(process.argv))
   .command('$0', `
@@ -150,325 +153,359 @@ Runs Cypress tests in the Sauce Labs cloud
   .argv;
 
 async function run (argv) {
-  let {
-    sauceUsername,
-    sauceAccessKey,
-    sauceLocal,
-    sauceCypressVersion,
-    sauceConcurrency = 2,
-    sauceRegion,
-    project = './',
-    config = '',
-    configFile = './cypress.json',
-    env = '',
-    ciBuildId,
-    browser = 'chrome',
-  } = argv;
+  try {
+    let {
+      sauceUsername,
+      sauceAccessKey,
+      sauceLocal,
+      sauceCypressVersion,
+      sauceConcurrency = 2,
+      sauceRegion,
+      project = './',
+      config = '',
+      configFile = './cypress.json',
+      env = '',
+      ciBuildId,
+      browser = 'chrome',
+    } = argv;
 
-  let {
-    SAUCE_USERNAME,
-    SAUCE_ACCESS_KEY,
-  } = process.env;
+    let {
+      SAUCE_USERNAME,
+      SAUCE_ACCESS_KEY,
+    } = process.env;
 
-  sauceUsername = SAUCE_USERNAME || sauceUsername;
-  sauceAccessKey = SAUCE_ACCESS_KEY || sauceAccessKey;
+    sauceUsername = SAUCE_USERNAME || sauceUsername;
+    sauceAccessKey = SAUCE_ACCESS_KEY || sauceAccessKey;
 
-  if (!sauceUsername) {
-    throw new Error(`Looks like you haven't provided your Sauce username. If you haven't already, sign up for an account at ` +
-        `https://saucelabs.com/sign-up and provide your username in the command: "--sauce-username YOUR_USERNAME"`);
-  }
-  if (!sauceAccessKey) {
-    throw new Error(`Looks like you haven't provided your Sauce Access Key. To retrieve your Sauce Access Key, sign in to ` +
-        `your Sauce Labs account '${sauceUsername}' and navigate to https://app.saucelabs.com/user-settings to copy and ` +
-        `paste your Access Key and provide it in the command: "--sauce-access-key YOUR_ACCESS_KEY"`);
-  }
-
-  // Determine region to run tests
-  let region = 'us-west-1';
-  if (sauceRegion === 'us' || sauceRegion === 'us-west-1') {
-    region = 'us-west-1';
-  } else if (sauceRegion === 'eu' || sauceRegion === 'eu-central-1') {
-    region = 'eu-central-1';
-  } else if (sauceRegion === 'staging') {
-    region = 'staging';
-  } else if (sauceRegion) {
-    throw new Error(`Unsupported region ${sauceRegion}`);
-  }
-  let sauceUrl = `https://${SAUCE_USERNAME}:${SAUCE_ACCESS_KEY}@api.${region}.saucelabs.com`;
-  if (region === 'staging') {
-    sauceUrl = `https://${SAUCE_USERNAME}:${SAUCE_ACCESS_KEY}@api.${region}.saucelabs.net`;
-  }
-
-  // Look at the users info
-  const userUrl = `${sauceUrl}/rest/v1/users/${SAUCE_USERNAME}`;
-  const { user_type: userType, concurrency_limit: concurrencyLimit } = (await axios.get(userUrl)).data;
-  if (userType === 'free') {
-    console.error(`Your Sauce Labs account ${SAUCE_USERNAME} has expired. ` +
-        `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
-  }
-  if (userType === 'free_trial' || userType === 'freemium') {
-    console.info(`You are using a free version of Sauce Labs with limited concurrency and minutes. ` +
-        `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
-  }
-
-  const maxConcurrency = concurrencyLimit.overall;
-  if (maxConcurrency < sauceConcurrency) {
-    console.warn(`You chose a concurrency limit of ${sauceConcurrency} but your account only provides ${maxConcurrency}. ` +
-        `Setting concurrency to ${maxConcurrency}` +
-        `To increase your concurrency visit https://app.saucelabs.com/billing/plans to upgrade your account`);
-    sauceConcurrency = maxConcurrency;
-  }
-
-  const workingDir = process.cwd();
-
-  const sauceBrowserList = [];
-  // const supportedBrowsers = axios.get(`${sauceUrl}/rest/v1/info/platforms/all?resolutions=true`);
-  for (const browserInfo of browser.split(',')) {
-    let [browserName, browserVersion, os, screenResolution] = browserInfo.trim().split(':');
-    // TODO: Validate the browser names, versions and platforms
-    if (os && os.toLowerCase().startsWith('mac')) {
-      console.error(`Platform '${os}' is not supported in Sauce Cloud. ` +
-          `If you'd like to see this, request it at https://saucelabs.ideas.aha.io/`);
+    if (!sauceUsername) {
+      log.errorAndThrow(`Looks like you haven't provided your Sauce username. If you haven't already, sign up for an account at ` +
+          `https://saucelabs.com/sign-up and provide your username in the command: "--sauce-username YOUR_USERNAME"`);
     }
-    sauceBrowserList.push([
-      browserName,
-      browserVersion || '',
-      os || 'Windows 10', // TODO: Allow generic Windows or Win and convert it to a good default
-      screenResolution,
-    ]);
-  }
-
-  // GENERATE CYPRESS CONFIG
-  let cypressConfig = {};
-
-  if (configFile !== 'false') {
-    const pathToConfig = path.join(workingDir, project, configFile);
-    if (!fs.existsSync(pathToConfig)) {
-      throw new Error(`Could not find a Cypress configuration file, exiting.
-
-We looked but did not find a ${pathToConfig} file in this folder: ${workingDir}`);
+    if (!sauceAccessKey) {
+      log.errorAndThrow(`Looks like you haven't provided your Sauce Access Key. To retrieve your Sauce Access Key, sign in to ` +
+          `your Sauce Labs account '${sauceUsername}' and navigate to https://app.saucelabs.com/user-settings to copy and ` +
+          `paste your Access Key and provide it in the command: "--sauce-access-key YOUR_ACCESS_KEY"`);
     }
-    try {
-      cypressConfig = {...cypressConfig, ...require(pathToConfig)};
-    } catch (e) {
-      throw new Error(`Cypress config file at '${pathToConfig}' contains invalid JSON: ${e.message}`);
+
+    // Determine region to run tests
+    let region = 'us-west-1';
+    if (sauceRegion === 'us' || sauceRegion === 'us-west-1') {
+      region = 'us-west-1';
+    } else if (sauceRegion === 'eu' || sauceRegion === 'eu-central-1') {
+      region = 'eu-central-1';
+    } else if (sauceRegion === 'staging') {
+      region = 'staging';
+    } else if (sauceRegion) {
+      log.errorAndThrow(`Unsupported region ${sauceRegion}`);
     }
-  }
-
-  for (const keyValuePair of config.trim().split(',')) {
-    if (keyValuePair === '') {continue;}
-    const [configKey, configValue] = keyValuePair.split('=');
-    if (!configValue) {
-      throw new Error(`Encountered an error while parsing the argument 'config'.
-        
-You passed: '${keyValuePair}'. Must provide a key and value separated by = sign`);
+    let sauceUrl = `https://${SAUCE_USERNAME}:${SAUCE_ACCESS_KEY}@api.${region}.saucelabs.com`;
+    if (region === 'staging') {
+      sauceUrl = `https://${SAUCE_USERNAME}:${SAUCE_ACCESS_KEY}@api.${region}.saucelabs.net`;
     }
-    cypressConfig[configKey] = configValue;
-  }
 
-  // ENVIRONMENT VARIABLES
-  let cypressEnv = {};
-
-  const pathToCypressEnv = path.join(process.cwd(), 'cypress.env.json');
-  if (fs.existsSync(pathToCypressEnv)) {
-    try {
-      cypressEnv = {...cypressEnv, ...JSON.parse(require(pathToCypressEnv))};
-    } catch (e) {
-      throw new Error(`Cypress env file at '${pathToCypressEnv}' contains invalid JSON: ${e.message}`);
+    // Look at the users info
+    const userUrl = `${sauceUrl}/rest/v1/users/${SAUCE_USERNAME}`;
+    const { user_type: userType, concurrency_limit: concurrencyLimit } = (await axios.get(userUrl)).data;
+    if (userType === 'free') {
+      log.error(`Your Sauce Labs account ${SAUCE_USERNAME} has expired. ` +
+          `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
     }
-  }
-
-  for (const envPair of env.trim().split(',')) {
-    if (envPair === '') {continue;}
-    const [envKey, envValue] = envPair.split('=');
-    if (!envValue) {
-      throw new Error(`Encountered an error while parsing the argument 'env'.
-        
-You passed: '${envPair}'. Must provide a key and value separated by = sign`);
+    if (userType === 'free_trial' || userType === 'freemium') {
+      log.info(`You are using a free version of Sauce Labs with limited concurrency and minutes. ` +
+          `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
     }
-    cypressEnv[envKey] = envValue;
-  }
 
-  cypressConfig.env = {...cypressConfig.env, ...cypressEnv};
+    const maxConcurrency = concurrencyLimit.overall;
+    if (maxConcurrency < sauceConcurrency) {
+      log.warn(`You chose a concurrency limit of ${sauceConcurrency} but your account only provides ${maxConcurrency}. ` +
+          `Setting concurrency to ${maxConcurrency}` +
+          `To increase your concurrency visit https://app.saucelabs.com/billing/plans to upgrade your account`);
+      sauceConcurrency = maxConcurrency;
+    }
 
-  // WRITE CYPRESS CONFIG TO JSON FILE
-  const cypressFileName = `__$$cypress-saucelabs$$__.json`;
-  const cypressFilePath = path.join(workingDir, project, cypressFileName);
-  fs.writeFileSync(cypressFilePath, JSON.stringify(cypressConfig, null, 2));
+    const workingDir = process.cwd();
 
-  if (!ciBuildId) {
-    // TODO: Auto-detect the CI build ID
-    ciBuildId = `Cypress Build -- ${+new Date()}`;
-  }
+    const sauceBrowserList = [];
+    // TODO: Add sauce-config.js(on) support
+    // const supportedBrowsers = axios.get(`${sauceUrl}/rest/v1/info/platforms/all?resolutions=true`);
+    for (const browserInfo of browser.split(',')) {
+      let [browserName, browserVersion, os, screenResolution] = browserInfo.trim().split(':');
+      // TODO: Validate the browser names, versions and platforms
+      if (os && os.toLowerCase().startsWith('mac')) {
+        log.error(`Platform '${os}' is not supported in Sauce Cloud. ` +
+            `If you'd like to see this, request it at https://saucelabs.ideas.aha.io/`);
+      }
+      sauceBrowserList.push([
+        browserName,
+        browserVersion || '',
+        os || 'Windows 10', // TODO: Allow generic Windows or Win and convert it to a good default
+        screenResolution,
+      ]);
+    }
 
-  // CREATE SAUCE-RUNNER.JSON
-  const sauceRunnerJson = {
-    apiVersion: 'v1alpha',
-    kind: 'cypress',
-    sauce: {
-      metadata: {
-        name: ciBuildId,
-        tags: [
-          'cypress-saucelabs',
-          // TODO: Add user defined tags here
-        ],
-        build: ciBuildId,
+    // GENERATE CYPRESS CONFIG
+    let cypressConfig = {};
+
+    if (configFile !== 'false') {
+      const pathToConfig = path.join(workingDir, project, configFile);
+      if (!fs.existsSync(pathToConfig)) {
+        log.errorAndThrow(`Could not find a Cypress configuration file, exiting.
+
+  We looked but did not find a ${pathToConfig} file in this folder: ${workingDir}`);
+      }
+      try {
+        cypressConfig = {...cypressConfig, ...require(pathToConfig)};
+      } catch (e) {
+        log.errorAndThrow(`Cypress config file at '${pathToConfig}' contains invalid JSON: ${e.message}`);
+      }
+    }
+
+    for (const keyValuePair of config.trim().split(',')) {
+      if (keyValuePair === '') {continue;}
+      const [configKey, configValue] = keyValuePair.split('=');
+      if (!configValue) {
+        log.errorAndThrow(`Encountered an error while parsing the argument 'config'.
+          
+  You passed: '${keyValuePair}'. Must provide a key and value separated by = sign`);
+      }
+      cypressConfig[configKey] = configValue;
+    }
+
+    // ENVIRONMENT VARIABLES
+    let cypressEnv = {};
+
+    const pathToCypressEnv = path.join(process.cwd(), 'cypress.env.json');
+    if (fs.existsSync(pathToCypressEnv)) {
+      try {
+        cypressEnv = {...cypressEnv, ...JSON.parse(require(pathToCypressEnv))};
+      } catch (e) {
+        log.errorAndThrow(`Cypress env file at '${pathToCypressEnv}' contains invalid JSON: ${e.message}`);
+      }
+    }
+
+    for (const envPair of env.trim().split(',')) {
+      if (envPair === '') {continue;}
+      const [envKey, envValue] = envPair.split('=');
+      if (!envValue) {
+        log.errorAndThrow(`Encountered an error while parsing the argument 'env'.
+          
+  You passed: '${envPair}'. Must provide a key and value separated by = sign`);
+      }
+      cypressEnv[envKey] = envValue;
+    }
+
+    cypressConfig.env = {...cypressConfig.env, ...cypressEnv};
+
+    // WRITE CYPRESS CONFIG TO JSON FILE
+    const cypressFileName = `__$$cypress-saucelabs$$__.json`;
+    const cypressFilePath = path.join(workingDir, project, cypressFileName);
+    fs.writeFileSync(cypressFilePath, JSON.stringify(cypressConfig, null, 2));
+
+    if (!ciBuildId) {
+      // TODO: Auto-detect the CI build ID
+      ciBuildId = `Cypress Build -- ${+new Date()}`;
+    }
+
+    // CREATE SAUCE-RUNNER.JSON
+    const sauceRunnerJson = {
+      apiVersion: 'v1alpha',
+      kind: 'cypress',
+      sauce: {
+        metadata: {
+          name: ciBuildId,
+          tags: [
+            'cypress-saucelabs',
+            // TODO: Add user defined tags here
+          ],
+          build: ciBuildId,
+        },
+        region: 'us-west-1', // TODO: Let user decide region here
       },
-      region: 'us-west-1', // TODO: Let user decide region here
-    },
-    cypress: {
-      configFile: path.relative(workingDir, cypressFilePath),
-      version: sauceCypressVersion || defaultCypressVersion,
-    },
-    suites: sauceBrowserList.map(([browserName, browserVersion, os, screenResolution], index) => ({
-      name: `SUITE ${index + 1} of ${sauceBrowserList.length}: ${browserName} -- ${browserVersion || 'latest'} -- ${os}` + (screenResolution ? ` -- ${screenResolution}` : ''),
-      browser: browserName,
-      browserVersion,
-      platformName: os,
-      screenResolution,
-      config: {},
-    })),
-  };
-  fs.writeFileSync(path.join(workingDir, 'sauce-runner.json'), JSON.stringify(sauceRunnerJson, null, 2));
-
-  // TODO: Add Winston logging
-
-  // Warn about permanently unsupported Cypress parameters
-  const unsupportedParameters = ['tag', 'spec', 'reporterOptions', 'reporter', 'quiet', 'noExit', 'headless', 'headed', 'group'];
-  for (const parameter of unsupportedParameters) {
-    if (argv[parameter]) {
-      console.warn(`Found parameter '${parameter}=${argv[parameter]}'. '${parameter}' is not used in Sauce Labs cloud and will be ignored`);
-    }
-  }
-
-  // Give a link to Aha! for unsupported
-  if (argv.parallel) {
-    console.warn(`'parallel' parameter is not supported in Sauce cloud. If you'd like to see this, request it at https://saucelabs.ideas.aha.io/`);
-  }
-
-  // TODO: Add a cleanup task to remove artifacts
-
-  if (sauceLocal) {
-    // TODO: Add local mode that runs "sauce-cypress-runner" (need to publish "sauce-cypress-runner" to NPM)
-  } else {
-    const sauceIgnoreDir = path.join(workingDir, '.sauceignore');
-    if (!fs.existsSync(sauceIgnoreDir)) {
-      console.log(`Writing .sauceignore file to '${sauceIgnoreDir}'`);
-      fs.copyFileSync(path.join(__dirname, '.sauceignore'), sauceIgnoreDir);
-    }
-
-    // ZIP THE PROJECT
-    const zipFileOut = '__$$cypress-saucelabs$$__.zip';
-    const ig = ignore()
-        .add(['.sauceignore', '.git', zipFileOut])
-        .add(fs.readFileSync(sauceIgnoreDir).toString());
-    let filenames = [];
-    (function recursiveReaddirSync (dir) {
-      const files = fs.readdirSync(dir);
-      for (const file of files) {
-        try {
-          if (fs.lstatSync(path.join(dir, file)).isDirectory()) {
-            recursiveReaddirSync(path.join(dir, file));
-          } else {
-            filenames.push(path.relative(workingDir, path.join(dir, file)));
-          }
-        } catch (ign) { }
-      }
-    })(workingDir);
-    filenames = ig.filter(filenames);
-
-    const zip = new AdmZip();
-    for (const filename of filenames) {
-      const absoluteFilePath = path.join(workingDir, filename);
-      const relativeFilePath = path.relative(workingDir, absoluteFilePath);
-      zip.addLocalFile(absoluteFilePath, path.dirname(relativeFilePath), path.basename(relativeFilePath));
-    }
-    zip.writeZip(zipFileOut);
-
-    // Upload the zip file to Application Storage
-    const zipFileStream = fs.createReadStream(zipFileOut);
-    const formData = new FormData();
-    formData.append('payload', zipFileStream);
-    const endpoint = `${sauceUrl}/v1/storage/upload`;
-    const upload = await axios.post(endpoint, formData, {
-      headers: formData.getHeaders(),
-      maxBodyLength: 3 * 1024 * 1024 * 1024,
-    });
-    const {id: storageId} = upload.data.item;
-
-    // TODO: Add sauce-connect tunnel automator. Check users Cypress to see if using 'localhost' and recommend they use 'sauce-tunnel'
-
-    // Run the tests via testcomposer
-    const runJob = async (suite) => {
-      // TODO: Introduce a way to retry job
-      const { name } = suite;
-      const testComposerBody = {
-        username: sauceUsername,
-        accessKey: sauceAccessKey,
-        browserName: suite.browser,
-        browserVersion: suite.browserVersion,
-        platformName: suite.platformName,
-        name: suite.name,
-        app: `storage:${storageId}`,
-        suite: name,
-        framework: 'cypress',
-        build: ciBuildId,
-        tags: null, // TODO: Tags
-        tunnel: null, // TODO: Tunnel
-        frameworkVersion: sauceRunnerJson.cypress.version,
-      };
-      const response = await axios.post(`${sauceUrl}/v1/testcomposer/jobs`, testComposerBody);
-      // TODO: Add a timeout option (right now it's just 30 minutes);
-      const passed = await retryInterval(4 * 30, 15000, async function () {
-        const resp = await axios.get(`${sauceUrl}/rest/v1/${SAUCE_USERNAME}/jobs/${response.data.jobID}`);
-        if (resp.data.status !== 'complete') {throw new Error('not done yet');}
-        return resp.data.passed;
-      });
-      return passed;
+      cypress: {
+        configFile: path.relative(workingDir, cypressFilePath),
+        version: sauceCypressVersion || defaultCypressVersion,
+      },
+      suites: sauceBrowserList.map(([browserName, browserVersion, os, screenResolution], index) => ({
+        name: `SUITE ${index + 1} of ${sauceBrowserList.length}: ${browserName} -- ${browserVersion || 'latest'} -- ${os}` + (screenResolution ? ` -- ${screenResolution}` : ''),
+        browser: browserName,
+        browserVersion,
+        platformName: os,
+        screenResolution,
+        config: {},
+      })),
     };
+    fs.writeFileSync(path.join(workingDir, 'sauce-runner.json'), JSON.stringify(sauceRunnerJson, null, 2));
 
-    let currentSuiteIndex = 0;
-    let runningJobs = 0;
-    const runAllJobsPromise = new Promise((resolve, reject) => {
-      function runInterval () {
-        while (runningJobs < Math.min(sauceConcurrency, sauceRunnerJson.suites.length)) {
-          if (!sauceRunnerJson.suites[currentSuiteIndex]) {
-            resolve();
-            return;
-          }
-          runningJobs++;
-          runJob(sauceRunnerJson.suites[currentSuiteIndex])
-              .then(function (passed) {
-                if (!passed) {
-                  // TODO: Make a parameter to allow user to just continue until all are done
-                  reject(`A suite did not pass. Cancelling rest of the suites.`);
-                  return;
-                }
-                runningJobs--;
-                runInterval();
-              })
-              .catch(function (reason) {
-                // TODO: Make a parameter to allow user to just continue until all are done
-                reject(`A suite failed. Cancelling rest of the suite. Reason: ${reason}`);
-              });
-          currentSuiteIndex++;
-        }
+    // Warn about permanently unsupported Cypress parameters
+    const unsupportedParameters = ['tag', 'spec', 'reporterOptions', 'reporter', 'quiet', 'noExit', 'headless', 'headed', 'group'];
+    for (const parameter of unsupportedParameters) {
+      if (argv[parameter]) {
+        log.warn(`Found parameter '${parameter}=${argv[parameter]}'. '${parameter}' is not used in Sauce Labs cloud and will be ignored`);
       }
-      runInterval();
-    });
-    await runAllJobsPromise;
+    }
 
-    console.log(`Finished running ${sauceRunnerJson.suites.length} suites. All passed.`);
+    // Give a link to Aha! for unsupported
+    if (argv.parallel) {
+      log.warn(`'parallel' parameter is not supported in Sauce cloud. If you'd like to see this, request it at https://saucelabs.ideas.aha.io/`);
+    }
+
+    // TODO: Add a cleanup task to remove artifacts
+
+    if (sauceLocal) {
+      // TODO: Add local mode that runs "sauce-cypress-runner" (need to publish "sauce-cypress-runner" to NPM)
+    } else {
+      const sauceIgnoreDir = path.join(workingDir, '.sauceignore');
+      if (!fs.existsSync(sauceIgnoreDir)) {
+        log.info(`Writing .sauceignore file to '${sauceIgnoreDir}'`);
+        fs.copyFileSync(path.join(__dirname, '.sauceignore'), sauceIgnoreDir);
+      }
+
+      // ZIP THE PROJECT
+      log.info(`Bundling contents of ${workingDir} to zip file`);
+      const zipFileOut = '__$$cypress-saucelabs$$__.zip';
+      const ig = ignore()
+          .add(['.sauceignore', '.git', zipFileOut])
+          .add(fs.readFileSync(sauceIgnoreDir).toString());
+      let filenames = [];
+      (function recursiveReaddirSync (dir) {
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          try {
+            if (fs.lstatSync(path.join(dir, file)).isDirectory()) {
+              recursiveReaddirSync(path.join(dir, file));
+            } else {
+              filenames.push(path.relative(workingDir, path.join(dir, file)));
+            }
+          } catch (ign) { }
+        }
+      })(workingDir);
+      filenames = ig.filter(filenames);
+
+      const zip = new AdmZip();
+      for (const filename of filenames) {
+        const absoluteFilePath = path.join(workingDir, filename);
+        const relativeFilePath = path.relative(workingDir, absoluteFilePath);
+        zip.addLocalFile(absoluteFilePath, path.dirname(relativeFilePath), path.basename(relativeFilePath));
+      }
+      zip.writeZip(zipFileOut);
+      log.info(`Wrote zip file to '${zipFileOut}'`);
+
+      // Upload the zip file to Application Storage
+      log.info(`Uploading zip file to Sauce Labs Application Storage`);
+      const zipFileStream = fs.createReadStream(zipFileOut);
+      const formData = new FormData();
+      formData.append('payload', zipFileStream);
+      const endpoint = `${sauceUrl}/v1/storage/upload`;
+      const upload = await axios.post(endpoint, formData, {
+        headers: formData.getHeaders(),
+        maxBodyLength: 3 * 1024 * 1024 * 1024,
+      });
+      const {id: storageId} = upload.data.item;
+      log.info(`Done uploading to Application Storage with storage ID '${storageId}'`);
+
+      // TODO: Add sauce-connect tunnel automator. Check users Cypress to see if using 'localhost' and recommend they use 'sauce-tunnel'
+      log.info(`TODO: Starting a sauce connect tunnel`);
+
+      const getBuildId = async (jobId) => {
+        const { data: job } = await axios.get(`${sauceUrl}/rest/v1/${SAUCE_USERNAME}/jobs/${jobId}`);
+        const buildName = job.build;
+        const { data: builds } = await axios.get(`${sauceUrl}/rest/v1/${SAUCE_USERNAME}/builds`, {params: {status: 'running'}});
+        if (builds) {
+          for (const build of builds) {
+            if (build.name === buildName) {
+              return build.id;
+            }
+          }
+        }
+        throw new Error(`Could not find build`);
+      };
+
+      let loggedBuild = false;
+
+      // Run the tests via testcomposer
+      const runJob = async (suite) => {
+        // TODO: Introduce a way to retry job
+        const { name } = suite;
+        const testComposerBody = {
+          username: sauceUsername,
+          accessKey: sauceAccessKey,
+          browserName: suite.browser,
+          browserVersion: suite.browserVersion,
+          platformName: suite.platformName,
+          name: suite.name,
+          app: `storage:${storageId}`,
+          suite: name,
+          framework: 'cypress',
+          build: ciBuildId,
+          tags: null, // TODO: Tags
+          tunnel: null, // TODO: Tunnel
+          frameworkVersion: sauceRunnerJson.cypress.version,
+        };
+        const response = await axios.post(`${sauceUrl}/v1/testcomposer/jobs`, testComposerBody);
+        const jobId = response.data.jobID;
+        if (!loggedBuild) {
+          loggedBuild = true;
+          const buildId = await retryInterval(5, 5000, async () => getBuildId(jobId));
+          if (buildId) {
+            log.info(`To view your suites, visit 'https://app.saucelabs.com/builds/vdc/${buildId}'`);
+          }
+        }
+
+        // TODO: Add a timeout option (right now it's just 30 minutes);
+        const passed = await retryInterval(4 * 30, 15000, async function () {
+          const resp = await axios.get(`${sauceUrl}/rest/v1/${SAUCE_USERNAME}/jobs/${jobId}`);
+          if (resp.data.status !== 'complete') {
+            throw new Error('not done yet');
+          }
+          return resp.data.passed;
+        });
+        return passed;
+      };
+
+      let currentSuiteIndex = 0;
+      let runningJobs = 0;
+      const runAllJobsPromise = new Promise((resolve, reject) => {
+        function runInterval () {
+          while (runningJobs < Math.min(sauceConcurrency, sauceRunnerJson.suites.length)) {
+            if (!sauceRunnerJson.suites[currentSuiteIndex]) {
+              resolve();
+              return;
+            }
+            runningJobs++;
+            runJob(sauceRunnerJson.suites[currentSuiteIndex])
+                .then(function (passed) {
+                  if (!passed) {
+                    // TODO: Make a parameter to allow user to just continue until all are done
+                    reject(`Your suites did not pass`);
+                    return;
+                  }
+                  runningJobs--;
+                  runInterval();
+                })
+                .catch(function () {
+                  // TODO: Make a parameter to allow user to just continue until all are done
+                  reject(`Your suites did not pass.`);
+                });
+            currentSuiteIndex++;
+          }
+        }
+        runInterval();
+      });
+      const numberOfSuites =  sauceRunnerJson.suites.length;
+      log.info(`Running ${numberOfSuites} suites.`);
+      await runAllJobsPromise;
+      log.info(`Finished running ${sauceRunnerJson.suites.length} suites. All passed.`);
+    }
+  } catch (e) {
+    log.errorAndThrow(e);
   }
 }
 
-// TODO: Add linting
 // TODO: Add Jest unit test
 // TODO: Add Jest E2E test
 // TODO: Add publishing script
 // TODO: Add GitHub Actions
 // TODO: NPM Package command line parameter
 // TODO: Add bin to package.json
-// TODO: Publish this package to NPM
 
 module.exports = run;
