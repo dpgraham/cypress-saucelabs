@@ -8,6 +8,9 @@ const AdmZip = require('adm-zip');
 const FormData = require('form-data');
 const { retryInterval } = require('asyncbox');
 const { logger } = require('appium-support');
+const { get:emoji } = require('node-emoji');
+const chalk = require('chalk');
+const { startPrintDots, stopPrintDots } = require('./utils');
 
 const defaultCypressVersion = require('../package.json').version;
 const { default: axios } = require('axios');
@@ -207,17 +210,17 @@ async function run (argv) {
     const userUrl = `${sauceUrl}/rest/v1/users/${SAUCE_USERNAME}`;
     const { user_type: userType, concurrency_limit: concurrencyLimit } = (await axios.get(userUrl)).data;
     if (userType === 'free') {
-      log.error(`Your Sauce Labs account ${SAUCE_USERNAME} has expired. ` +
+      log.error(`${emoji('x')} Your Sauce Labs account ${SAUCE_USERNAME} has expired. ` +
           `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
     }
     if (userType === 'free_trial' || userType === 'freemium') {
-      log.info(`You are using a free version of Sauce Labs with limited concurrency and minutes. ` +
+      log.info(`${emoji('warning')} You are using a free version of Sauce Labs with limited concurrency and minutes. ` +
           `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
     }
 
     const maxConcurrency = concurrencyLimit.overall;
     if (maxConcurrency < sauceConcurrency) {
-      log.warn(`You chose a concurrency limit of ${sauceConcurrency} but your account only provides ${maxConcurrency}. ` +
+      log.warn(`${emoji('warning')} You chose a concurrency limit of ${sauceConcurrency} but your account only provides ${maxConcurrency}. ` +
           `Setting concurrency to ${maxConcurrency}` +
           `To increase your concurrency visit https://app.saucelabs.com/billing/plans to upgrade your account`);
       sauceConcurrency = maxConcurrency;
@@ -356,12 +359,12 @@ async function run (argv) {
     } else {
       const sauceIgnoreDir = path.join(workingDir, '.sauceignore');
       if (!fs.existsSync(sauceIgnoreDir)) {
-        log.info(`Writing .sauceignore file to '${sauceIgnoreDir}'`);
+        log.info(`${emoji('information_source')} Writing .sauceignore file to '${sauceIgnoreDir}'`);
         fs.copyFileSync(path.join(__dirname, '.sauceignore'), sauceIgnoreDir);
       }
 
       // ZIP THE PROJECT
-      log.info(`Bundling contents of ${workingDir} to zip file`);
+      log.info(`${emoji('package')} Bundling contents of ${chalk.blue(workingDir)} to zip file`);
       const zipFileOut = '__$$cypress-saucelabs$$__.zip';
       const ig = ignore()
           .add(['.sauceignore', '.git', zipFileOut])
@@ -388,10 +391,10 @@ async function run (argv) {
         zip.addLocalFile(absoluteFilePath, path.dirname(relativeFilePath), path.basename(relativeFilePath));
       }
       zip.writeZip(zipFileOut);
-      log.info(`Wrote zip file to '${zipFileOut}'`);
+      log.info(`${emoji('white_check_mark')} Wrote zip file to '${chalk.blue(path.join(workingDir, zipFileOut))}'`);
 
       // Upload the zip file to Application Storage
-      log.info(`Uploading zip file to Sauce Labs Application Storage`);
+      log.info(`${emoji('rocket')} Uploading zip file to Sauce Labs Application Storage`);
       const zipFileStream = fs.createReadStream(zipFileOut);
       const formData = new FormData();
       formData.append('payload', zipFileStream);
@@ -401,7 +404,7 @@ async function run (argv) {
         maxBodyLength: 3 * 1024 * 1024 * 1024,
       });
       const {id: storageId} = upload.data.item;
-      log.info(`Done uploading to Application Storage with storage ID '${storageId}'`);
+      log.info(`${emoji('white_check_mark')} Done uploading to Application Storage with storage ID '${chalk.green(storageId)}'`);
 
       // TODO: Add sauce-connect tunnel automator. Check users Cypress to see if using 'localhost' and recommend they use 'sauce-tunnel'
       log.info(`TODO: Starting a sauce connect tunnel`);
@@ -447,8 +450,9 @@ async function run (argv) {
           loggedBuild = true;
           const buildId = await retryInterval(5, 5000, async () => getBuildId(jobId));
           if (buildId) {
-            log.info(`To view your suites, visit 'https://app.saucelabs.com/builds/vdc/${buildId}'`);
+            log.info(`${emoji('information_source')}  To view your suites, visit ${chalk.blue(`https://app.saucelabs.com/builds/vdc/${buildId}`)}'`);
           }
+          startPrintDots();
         }
 
         // TODO: Add a timeout option (right now it's just 30 minutes);
@@ -492,9 +496,10 @@ async function run (argv) {
         runInterval();
       });
       const numberOfSuites =  sauceRunnerJson.suites.length;
-      log.info(`Running ${numberOfSuites} suites.`);
+      log.info(`${emoji('rocket')} Running ${numberOfSuites} suites.`);
       await runAllJobsPromise;
-      log.info(`Finished running ${sauceRunnerJson.suites.length} suites. All passed.`);
+      stopPrintDots();
+      log.info(`${emoji('white_check_mark')} Finished running ${sauceRunnerJson.suites.length} suites. All passed.`);
     }
   } catch (e) {
     log.errorAndThrow(e);
@@ -507,5 +512,6 @@ async function run (argv) {
 // TODO: Add GitHub Actions
 // TODO: NPM Package command line parameter
 // TODO: Add bin to package.json
+// TODO: Add a CI.js library to get build-id and git commit
 
 module.exports = run;

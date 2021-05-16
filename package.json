@@ -21,8 +21,10 @@
     "appium-support": "2.53.0",
     "asyncbox": "2.8.0",
     "axios": "0.21.1",
+    "chalk": "4.1.1",
     "form-data": "4.0.0",
     "ignore": "5.1.8",
+    "node-emoji": "1.10.0",
     "yargs": "17.0.1"
   },
   "devDependencies": {
