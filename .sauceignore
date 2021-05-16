@@ -1,3 +1,6 @@
 node_modules/
 package-lock.json
 npm-shrinkwrap.json
+
+# Add glob patterns here for any files/folders you wish to be excluded from Cypress tests
+# e.g.) **/*.md # Excludes markdown files

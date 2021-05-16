@@ -206,8 +206,9 @@ async function run (argv) {
       console.error(`Your Sauce Labs account ${SAUCE_USERNAME} has expired. ` +
         `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
     }
-    if (userType === 'free' || userType === 'free_trial' || userType === 'freemium') {
-      // TODO: Add a log message saying they're using a free version and give a call to action to upgrade
+    if (userType === 'free_trial' || userType === 'freemium') {
+      console.info(`You are using a free version of Sauce Labs with limited concurrency and minutes. ` +
+        `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
     }
 
     const maxConcurrency = concurrencyLimit.overall;
@@ -218,20 +219,23 @@ async function run (argv) {
       sauceConcurrency = maxConcurrency;
     }
 
-    // TODO: Generate a sauceignore here if none exists
-
     const workingDir = process.cwd();
 
     const sauceBrowserList = [];
+    // const supportedBrowsers = axios.get(`${sauceUrl}/rest/v1/info/platforms/all?resolutions=true`);
     for (const browserInfo of browser.split(',')) {
       let [browserName, browserVersion, os, screenResolution] = browserInfo.trim().split(':');
+      // TODO: Validate the browser names, versions and platforms
+      if (os && os.toLowerCase().startsWith('mac')) {
+        console.error(`Platform '${os}' is not supported in Sauce Cloud. ` +
+          `If you'd like to see this, request it at https://saucelabs.ideas.aha.io/`);
+      }
       sauceBrowserList.push([
         browserName,
         browserVersion || '',
         os || 'Windows 10', // TODO: Allow generic Windows or Win and convert it to a good default
         screenResolution,
       ]);
-      // TODO: Validate the browser names, versions and platforms
     }
 
     // GENERATE CYPRESS CONFIG
@@ -242,7 +246,7 @@ async function run (argv) {
       if (!fs.existsSync(pathToConfig)) {
         throw new Error(`Could not find a Cypress configuration file, exiting.
 
-We looked but did not find a ${pathToConfig} file in this folder: /Users/danielgraham/personal/cypress-saucelabs`);
+We looked but did not find a ${pathToConfig} file in this folder: ${workingDir}`);
       }
       try {
         cypressConfig = {...cypressConfig, ...require(pathToConfig)};
@@ -349,13 +353,17 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
     if (sauceLocal) {
       // TODO: Add local mode that runs "sauce-cypress-runner" (need to publish "sauce-cypress-runner" to NPM)
     } else {
-      // TODO: Check how many minutes the user has, if they're a free user and give a CTA to upgrade
+      const sauceIgnoreDir = path.join(workingDir, '.sauceignore');
+      if (!fs.existsSync(sauceIgnoreDir)) {
+        console.log(`Writing .sauceignore file to '${sauceIgnoreDir}'`);
+        fs.copyFileSync(path.join(__dirname, '.sauceignore'), sauceIgnoreDir);
+      }
 
       // ZIP THE PROJECT
       const zipFileOut = '__$$cypress-saucelabs$$__.zip';
       const ig = ignore()
         .add(['.sauceignore', '.git', zipFileOut])
-        .add(fs.readFileSync(path.join(workingDir, '.sauceignore')).toString());
+        .add(fs.readFileSync(sauceIgnoreDir).toString());
       let filenames = [];
       (function recursiveReaddirSync (dir) {
         const files = fs.readdirSync(dir);
@@ -462,5 +470,7 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
   // TODO: Add publishing script
   // TODO: Add GitHub Actions
   // TODO: NPM Package command line parameter
+  // TODO: Add bin to package.json
+  // TODO: Publish this package to NPM
 
   module.exports = run;
