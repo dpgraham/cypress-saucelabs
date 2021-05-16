@@ -4,6 +4,14 @@
   "lockfileVersion": 1,
   "requires": true,
   "dependencies": {
+    "@babel/runtime": {
+      "version": "7.14.0",
+      "resolved": "https://registry.npmjs.org/@babel/runtime/-/runtime-7.14.0.tgz",
+      "integrity": "sha512-JELkvo/DlpNdJ7dlyw/eY7E0suy5i5GQH+Vlxaq1nsNJ+H7f4Vtv3jMeCEgRhZZQFXTjldYfQgv2qmM6M1v5wA==",
+      "requires": {
+        "regenerator-runtime": "^0.13.4"
+      }
+    },
     "@cypress/listr-verbose-renderer": {
       "version": "0.4.1",
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/@cypress/listr-verbose-renderer/-/listr-verbose-renderer-0.4.1.tgz",
@@ -63,6 +71,19 @@
         "tough-cookie": "~2.5.0",
         "tunnel-agent": "^0.6.0",
         "uuid": "^3.3.2"
+      },
+      "dependencies": {
+        "form-data": {
+          "version": "2.3.3",
+          "resolved": "https://registry.npmjs.org/form-data/-/form-data-2.3.3.tgz",
+          "integrity": "sha512-1lLKB2Mu3aGP1Q/2eCOx0fNbRMe7XdwktwOruhfqqd0rIJWwN4Dh+E3hrPSlDCXnSR7UtZ1N38rVXm+6+MEhJQ==",
+          "dev": true,
+          "requires": {
+            "asynckit": "^0.4.0",
+            "combined-stream": "^1.0.6",
+            "mime-types": "^2.1.12"
+          }
+        }
       }
     },
     "@cypress/xvfb": {
@@ -181,11 +202,22 @@
       "integrity": "sha1-s6JoXF67ZB094C0WEALGD8n4VyA=",
       "dev": true
     },
+    "asyncbox": {
+      "version": "2.8.0",
+      "resolved": "https://registry.npmjs.org/asyncbox/-/asyncbox-2.8.0.tgz",
+      "integrity": "sha512-wutDUrsVaCOjNNEDskVnLAcu8nQRHRNtI/gz1LtR4GNYMF+yMiWe5YvFMOOeGlavbEmkwrTalftIaTwwCiMtog==",
+      "requires": {
+        "@babel/runtime": "^7.0.0",
+        "bluebird": "^3.5.1",
+        "es6-mapify": "^1.1.0",
+        "lodash": "^4.17.4",
+        "source-map-support": "^0.5.5"
+      }
+    },
     "asynckit": {
       "version": "0.4.0",
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/asynckit/-/asynckit-0.4.0.tgz",
-      "integrity": "sha1-x57Zf380y48robyXkLzDZkdLS3k=",
-      "dev": true
+      "integrity": "sha1-x57Zf380y48robyXkLzDZkdLS3k="
     },
     "at-least-node": {
       "version": "1.0.0",
@@ -204,6 +236,14 @@
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/aws4/-/aws4-1.11.0.tgz",
       "integrity": "sha1-1h9G2DslGSUOJ4Ta9bCUeai0HFk=",
       "dev": true
+    },
+    "axios": {
+      "version": "0.21.1",
+      "resolved": "https://registry.npmjs.org/axios/-/axios-0.21.1.tgz",
+      "integrity": "sha512-dKQiRHxGD9PPRIUNIWvZhPTPpl1rf/OxTYKsqKUDjBwYylTvV7SjSHJb9ratfyzM6wCdLCOYLzs73qpg5c4iGA==",
+      "requires": {
+        "follow-redirects": "^1.10.0"
+      }
     },
     "balanced-match": {
       "version": "1.0.2",
@@ -229,8 +269,7 @@
     "bluebird": {
       "version": "3.7.2",
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/bluebird/-/bluebird-3.7.2.tgz",
-      "integrity": "sha1-nyKcFb4nJFT/qXOs4NvueaGww28=",
-      "dev": true
+      "integrity": "sha1-nyKcFb4nJFT/qXOs4NvueaGww28="
     },
     "brace-expansion": {
       "version": "1.1.11",
@@ -251,8 +290,7 @@
     "buffer-from": {
       "version": "1.1.1",
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/buffer-from/-/buffer-from-1.1.1.tgz",
-      "integrity": "sha1-MnE7wCj3XAL9txDXx7zsHyxgcO8=",
-      "dev": true
+      "integrity": "sha1-MnE7wCj3XAL9txDXx7zsHyxgcO8="
     },
     "cachedir": {
       "version": "2.3.0",
@@ -433,7 +471,6 @@
       "version": "1.0.8",
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/combined-stream/-/combined-stream-1.0.8.tgz",
       "integrity": "sha1-w9RaizT9cwYxoRCoolIGgrMdWn8=",
-      "dev": true,
       "requires": {
         "delayed-stream": "~1.0.0"
       }
@@ -573,8 +610,7 @@
     "delayed-stream": {
       "version": "1.0.0",
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/delayed-stream/-/delayed-stream-1.0.0.tgz",
-      "integrity": "sha1-3zrhmayt+31ECqrgsp4icrJOxhk=",
-      "dev": true
+      "integrity": "sha1-3zrhmayt+31ECqrgsp4icrJOxhk="
     },
     "ecc-jsbn": {
       "version": "0.1.2",
@@ -604,6 +640,14 @@
       "dev": true,
       "requires": {
         "once": "^1.4.0"
+      }
+    },
+    "es6-mapify": {
+      "version": "1.2.0",
+      "resolved": "https://registry.npmjs.org/es6-mapify/-/es6-mapify-1.2.0.tgz",
+      "integrity": "sha512-b4QYXTO1HD0MMFs+JtYrQEaynlyuEInBF3anGQK11rQ45akiIBs+3YUyTBq9FLzM7rD5P2xAglEOXz9gcdmdIw==",
+      "requires": {
+        "@babel/runtime": "^7.0.0"
       }
     },
     "escalade": {
@@ -738,6 +782,11 @@
         "object-assign": "^4.1.0"
       }
     },
+    "follow-redirects": {
+      "version": "1.14.1",
+      "resolved": "https://registry.npmjs.org/follow-redirects/-/follow-redirects-1.14.1.tgz",
+      "integrity": "sha512-HWqDgT7ZEkqRzBvc2s64vSZ/hfOceEol3ac/7tKwzuvEyWx3/4UegXh5oBOIotkGsObyk3xznnSRVADBgWSQVg=="
+    },
     "forever-agent": {
       "version": "0.6.1",
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/forever-agent/-/forever-agent-0.6.1.tgz",
@@ -745,13 +794,12 @@
       "dev": true
     },
     "form-data": {
-      "version": "2.3.3",
-      "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/form-data/-/form-data-2.3.3.tgz",
-      "integrity": "sha1-3M5SwF9kTymManq5Nr1yTO/786Y=",
-      "dev": true,
+      "version": "4.0.0",
+      "resolved": "https://registry.npmjs.org/form-data/-/form-data-4.0.0.tgz",
+      "integrity": "sha512-ETEklSGi5t0QMZuiXoA/Q6vcnxcLQP5vdugSpuAyi6SVGi2clPPp+xgEhuMaHC+zGgn31Kd235W35f7Hykkaww==",
       "requires": {
         "asynckit": "^0.4.0",
-        "combined-stream": "^1.0.6",
+        "combined-stream": "^1.0.8",
         "mime-types": "^2.1.12"
       }
     },
@@ -1235,8 +1283,7 @@
     "lodash": {
       "version": "4.17.21",
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/lodash/-/lodash-4.17.21.tgz",
-      "integrity": "sha1-Z5WRxWTDv/quhFTPCz3zcMPWkRw=",
-      "dev": true
+      "integrity": "sha1-Z5WRxWTDv/quhFTPCz3zcMPWkRw="
     },
     "lodash.once": {
       "version": "4.1.1",
@@ -1310,14 +1357,12 @@
     "mime-db": {
       "version": "1.47.0",
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/mime-db/-/mime-db-1.47.0.tgz",
-      "integrity": "sha1-jLMT5Zll08Bc+/iYkVomevRqM1w=",
-      "dev": true
+      "integrity": "sha1-jLMT5Zll08Bc+/iYkVomevRqM1w="
     },
     "mime-types": {
       "version": "2.1.30",
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/mime-types/-/mime-types-2.1.30.tgz",
       "integrity": "sha1-bnvotMR5gl+F7WMmaV23P5MF1i0=",
-      "dev": true,
       "requires": {
         "mime-db": "1.47.0"
       }
@@ -1517,6 +1562,11 @@
         }
       }
     },
+    "regenerator-runtime": {
+      "version": "0.13.7",
+      "resolved": "https://registry.npmjs.org/regenerator-runtime/-/regenerator-runtime-0.13.7.tgz",
+      "integrity": "sha512-a54FxoJDIr27pgf7IgeQGxmqUNYrcV338lf/6gH456HZ/PhX+5BcwHXG9ajESmwe6WRO0tAzRUrRmNONWgkrew=="
+    },
     "request-progress": {
       "version": "3.0.0",
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/request-progress/-/request-progress-3.0.0.tgz",
@@ -1597,6 +1647,20 @@
       "resolved": "https://artifactory.inf.las1.saucelabs.net:443/artifactory/api/npm/all-npm/slice-ansi/-/slice-ansi-0.0.4.tgz",
       "integrity": "sha1-7b+JA/ZvfOL46v1s7tZeJkyDGzU=",
       "dev": true
+    },
+    "source-map": {
+      "version": "0.6.1",
+      "resolved": "https://registry.npmjs.org/source-map/-/source-map-0.6.1.tgz",
+      "integrity": "sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g=="
+    },
+    "source-map-support": {
+      "version": "0.5.19",
+      "resolved": "https://registry.npmjs.org/source-map-support/-/source-map-support-0.5.19.tgz",
+      "integrity": "sha512-Wonm7zOCIJzBGQdB+thsPar0kYuCIzYvxZwlBa87yi/Mdjv7Tip2cyVbLj5o0cFPN4EVkuTwb3GDDyUx2DGnGw==",
+      "requires": {
+        "buffer-from": "^1.0.0",
+        "source-map": "^0.6.0"
+      }
     },
     "sshpk": {
       "version": "1.16.1",

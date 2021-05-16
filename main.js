@@ -5,8 +5,11 @@ const { hideBin } = require('yargs/helpers');
 const fs = require('fs');
 const ignore = require('ignore');
 const AdmZip = require('adm-zip');
+const FormData = require('form-data');
+const { retryInterval } = require('asyncbox');
 
 const defaultCypressVersion = require('./package.json').version;
+const { default: axios } = require('axios');
 
 yargs(hideBin(process.argv))
   .command('$0', `
@@ -32,6 +35,11 @@ Runs Cypress tests in the Sauce Labs cloud
       .option('sauce-cypress-version', {
         type: 'string',
         description: `version of Cypress to run in cloud. Default is ${defaultCypressVersion}`
+      })
+      .option('sauce-concurrency', {
+        alias: ['ccy', 'concurrency'],
+        type: 'number',
+        description: `max number of jobs to run concurrently`
       })
       .option('browser', {
         alias: 'b',
@@ -136,11 +144,13 @@ Runs Cypress tests in the Sauce Labs cloud
   }, run)
   .argv;
 
-function run (argv) {
+async function run (argv) {
     let {
       sauceUsername,
       sauceAccessKey,
       sauceLocal,
+      sauceCypressVersion,
+      sauceConcurrency = 2,
       project = './',
       config = '',
       configFile = './cypress.json',
@@ -177,11 +187,14 @@ function run (argv) {
       sauceBrowserList.push([
         browserName,
         browserVersion || '',
-        os || 'Windows',
+        os || 'Windows 10', // TODO: Allow generic Windows or Win and convert it to a good default
         screenResolution,
       ]);
       // TODO: Validate the browser names, versions and platforms
     }
+
+    // Determine region to run tests
+    let region = 'us-west-1'; // TODO: Let users be able to set their region
 
     // GENERATE CYPRESS CONFIG
     let cypressConfig = {};
@@ -243,7 +256,7 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
 
     if (!ciBuildId) {
       // TODO: Auto-detect the CI build ID
-      ciBuildId = `Build -- ${+ new Date()}`;
+      ciBuildId = `Cypress Build -- ${+ new Date()}`;
     }
 
     // CREATE SAUCE-RUNNER.JSON
@@ -252,7 +265,7 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
       kind: 'cypress',
       sauce: {
         metadata: {
-          name: 'Test Name', // TODO: Add a general test name
+          name: ciBuildId,
           tags: [
             'cypress-saucelabs',
             // TODO: Add user defined tags here
@@ -263,13 +276,14 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
       },
       cypress: {
         configFile: path.relative(workingDir, cypressFilePath),
-        version: defaultCypressVersion, // TODO: Allow user to set Cypress version
+        version: sauceCypressVersion || defaultCypressVersion,
       },
-      suites: sauceBrowserList.map(([browserName, browserVersion, os, screenResolution]) => {
+      suites: sauceBrowserList.map(([browserName, browserVersion, os, screenResolution], index) => {
         return {
-          name: `${browserName} -- ${browserVersion || 'latest'} -- ${os}` + (screenResolution ? ` -- ${screenResolution}` : ''),
+          name: `SUITE ${index + 1} of ${sauceBrowserList.length}: ${browserName} -- ${browserVersion || 'latest'} -- ${os}` + (screenResolution ? ` -- ${screenResolution}` : ''),
           browser: browserName,
           browserVersion,
+          platformName: os,
           screenResolution,
           config: {},
         };
@@ -327,14 +341,84 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
       }
       zip.writeZip(zipFileOut);
 
-      // TODO: Upload the zip file to App Storage
+      const sauceUrl = `https://${SAUCE_USERNAME}:${SAUCE_ACCESS_KEY}@api.${region}.saucelabs.com`;
+
+      // Upload the zip file to Application Storage
+      const zipFileStream = fs.createReadStream(zipFileOut);
+      const formData = new FormData();
+      formData.append('payload', zipFileStream);
+      const endpoint = `${sauceUrl}/v1/storage/upload`;
+      const upload = await axios.post(endpoint, formData, {
+        headers: formData.getHeaders(),
+        maxBodyLength: 3 * 1024 * 1024 * 1024,
+      });
+      const {id: storageId} = upload.data.item;
 
       // TODO: Add sauce-connect tunnel automator. Check users Cypress to see if using 'localhost' and recommend they use 'sauce-tunnel'
 
-      // TODO: Run the test using TestComposer
+      // Run the tests via testcomposer
+      async function runJob (suite) {
+        // TODO: Introduce a 
+        const { name } = suite;
+        const testComposerBody = {
+          username: sauceUsername,
+          accessKey: sauceAccessKey,
+          browserName: suite.browser,
+          browserVersion: suite.browserVersion,
+          platformName: suite.platformName,
+          name: suite.name,
+          app: `storage:${storageId}`,
+          suite: name,
+          framework: 'cypress',
+          build: ciBuildId,
+          tags: null, // TODO: Tags
+          tunnel: null, // TODO: Tunnel
+          frameworkVersion: sauceRunnerJson.cypress.version,
+        };
+        const response = await axios.post(`${sauceUrl}/v1/testcomposer/jobs`, testComposerBody);
+        // TODO: Poll waiting for this job
+        // TODO: Add a timeout option (right now it's just 30 minutes);
+        const passed = await retryInterval(4 * 30, 15000, async function () {
+          const resp = await axios.get(`${sauceUrl}/rest/v1/${SAUCE_USERNAME}/jobs/${response.data.jobID}`);
+          if (resp.data.status !== 'complete') throw new Error('not done yet');
+          return resp.data.passed;
+        });
+        return passed;
+      };
+
+      let currentSuiteIndex = 0;
+      let runningJobs = 0;
+      const runAllJobsPromise = new Promise((resolve, reject) => {
+        function runInterval () {
+          while (runningJobs < Math.min(sauceConcurrency, sauceRunnerJson.suites.length)) {
+            if (!sauceRunnerJson.suites[currentSuiteIndex]) {
+              resolve();
+              return;
+            }
+            runningJobs++;
+            runJob(sauceRunnerJson.suites[currentSuiteIndex])
+              .then(function (passed) {
+                if (!passed) {
+                  // TODO: Make a parameter to allow user to just continue until all are done
+                  reject(`A suite did not pass. Cancelling rest of the suites.`);
+                  return;
+                }
+                runningJobs--;
+                runInterval();
+              })
+              .catch(function (reason) {
+                // TODO: Make a parameter to allow user to just continue until all are done
+                reject(`A suite failed. Cancelling rest of the suite. Reason: ${reason}`);
+              });
+            currentSuiteIndex++;
+          }
+        }
+        runInterval();
+      });
+      await runAllJobsPromise;
+
+      console.log(`Finished running ${sauceRunnerJson.suites.length} suites. All passed.`);
     }
-      
-    console.log('#####RUNNING CLOUD TESTS NOW', sauceBrowserList, cypressConfig, cypressEnv, ciBuildId);
   }
 
   // TODO: Add linting
@@ -342,6 +426,6 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
   // TODO: Add Jest E2E test
   // TODO: Add publishing script
   // TODO: Add GitHub Actions
-  // TODO: NPM Package command line variable
+  // TODO: NPM Package command line parameter
 
   module.exports = run;
