@@ -14,6 +14,8 @@ const { startPrintDots, stopPrintDots } = require('./utils');
 
 const defaultCypressVersion = require('../package.json').version;
 const { default: axios } = require('axios');
+const { default: SauceLabs } = require('saucelabs');
+const { uuidV4 } = require('appium-support/build/lib/util');
 
 const log = logger.getLogger();
 
@@ -51,6 +53,11 @@ Runs Cypress tests in the Sauce Labs cloud
         alias: ['region'],
         type: 'string',
         description: `data center to run tests from. Can be US (United States) or EU (Europe)`,
+      })
+      .option('sauce-tunnel', {
+        alias: ['tunnel'],
+        type: 'boolean',
+        description: `open up a SauceConnect tunnel so that the Sauce Labs VM can access localhost`,
       })
       .option('browser', {
         alias: 'b',
@@ -156,6 +163,7 @@ Runs Cypress tests in the Sauce Labs cloud
   .argv;
 
 async function run (argv) {
+  let scTunnel;
   try {
     let {
       sauceUsername,
@@ -164,6 +172,7 @@ async function run (argv) {
       sauceCypressVersion,
       sauceConcurrency = 2,
       sauceRegion,
+      sauceTunnel,
       project = './',
       config = '',
       configFile = './cypress.json',
@@ -226,7 +235,7 @@ async function run (argv) {
       sauceConcurrency = maxConcurrency;
     }
 
-    const workingDir = process.cwd();
+    const workingDir = path.join(process.cwd(), project);
 
     const sauceBrowserList = [];
     // TODO: Add sauce-config.js(on) support
@@ -250,7 +259,7 @@ async function run (argv) {
     let cypressConfig = {};
 
     if (configFile !== 'false') {
-      const pathToConfig = path.join(workingDir, project, configFile);
+      const pathToConfig = path.join(workingDir, configFile);
       if (!fs.existsSync(pathToConfig)) {
         log.errorAndThrow(`Could not find a Cypress configuration file, exiting.
 
@@ -301,7 +310,7 @@ async function run (argv) {
 
     // WRITE CYPRESS CONFIG TO JSON FILE
     const cypressFileName = `__$$cypress-saucelabs$$__.json`;
-    const cypressFilePath = path.join(workingDir, project, cypressFileName);
+    const cypressFilePath = path.join(workingDir, cypressFileName);
     fs.writeFileSync(cypressFilePath, JSON.stringify(cypressConfig, null, 2));
 
     if (!ciBuildId) {
@@ -360,7 +369,7 @@ async function run (argv) {
       const sauceIgnoreDir = path.join(workingDir, '.sauceignore');
       if (!fs.existsSync(sauceIgnoreDir)) {
         log.info(`${emoji('information_source')} Writing .sauceignore file to '${sauceIgnoreDir}'`);
-        fs.copyFileSync(path.join(__dirname, '.sauceignore'), sauceIgnoreDir);
+        fs.copyFileSync(path.join(__dirname, '..', '.sauceignore'), sauceIgnoreDir);
       }
 
       // ZIP THE PROJECT
@@ -404,10 +413,36 @@ async function run (argv) {
         maxBodyLength: 3 * 1024 * 1024 * 1024,
       });
       const {id: storageId} = upload.data.item;
-      log.info(`${emoji('white_check_mark')} Done uploading to Application Storage with storage ID '${chalk.green(storageId)}'`);
+      log.info(`${emoji('white_check_mark')} Done uploading to Application Storage with storage ID ${chalk.green(storageId)}`);
 
-      // TODO: Add sauce-connect tunnel automator. Check users Cypress to see if using 'localhost' and recommend they use 'sauce-tunnel'
-      log.info(`TODO: Starting a sauce connect tunnel`);
+      // TODO: Add a flag to set pre-existing tunnelId.... check open tunnels before running tests
+
+      if (!sauceTunnel && cypressConfig.baseUrl && cypressConfig.baseUrl.includes('localhost')) {
+        log.info(`${emoji('information_source')} Looks like you're running on localhost '${cypressConfig.baseUrl}'. ` +
+          `To allow Sauce Labs VM's to access your localhost, set '--sauce-tunnel true' in your command line arguments`);
+      }
+
+      let tunnelName;
+      let tunnelIdentifier;
+      if (sauceTunnel) {
+        const myAccount = new SauceLabs({user: SAUCE_USERNAME, key: SAUCE_ACCESS_KEY});
+        const scLogs = [];
+        log.info(`${emoji('rocket')} Starting a SauceConnect tunnel`);
+        tunnelName = uuidV4();
+        try {
+          scTunnel = await myAccount.startSauceConnect({
+            logger: (stdout) => {
+              scLogs.push(stdout);
+            },
+            tunnelIdentifier: tunnelName,
+            // TODO: Let user set other SauceConnect parameters
+          });
+          log.info(`${emoji('white_check_mark')} Started SauceConnect tunnel successfully with tunnel ID ${chalk.green(tunnelIdentifier)}`);
+        } catch (e) {
+          log.info(scLogs.join('\n'));
+          log.errorAndThrow('Failed to start tunnel', e);
+        }
+      }
 
       const getBuildId = async (jobId) => {
         const { data: job } = await axios.get(`${sauceUrl}/rest/v1/${SAUCE_USERNAME}/jobs/${jobId}`);
@@ -428,20 +463,23 @@ async function run (argv) {
       // Run the tests via testcomposer
       const runJob = async (suite) => {
         // TODO: Introduce a way to retry job
-        const { name } = suite;
+        const { name, browser, browserVersion, platformName, screenResolution } = suite;
         const testComposerBody = {
           username: sauceUsername,
           accessKey: sauceAccessKey,
-          browserName: suite.browser,
-          browserVersion: suite.browserVersion,
-          platformName: suite.platformName,
-          name: suite.name,
+          browserName: browser,
+          browserVersion,
+          platformName,
+          name,
+          screenResolution,
           app: `storage:${storageId}`,
           suite: name,
           framework: 'cypress',
           build: ciBuildId,
           tags: null, // TODO: Tags
-          tunnel: null, // TODO: Tunnel
+          tunnel: {
+            id: tunnelName,
+          },
           frameworkVersion: sauceRunnerJson.cypress.version,
         };
         const response = await axios.post(`${sauceUrl}/v1/testcomposer/jobs`, testComposerBody);
@@ -450,7 +488,7 @@ async function run (argv) {
           loggedBuild = true;
           const buildId = await retryInterval(5, 5000, async () => getBuildId(jobId));
           if (buildId) {
-            log.info(`${emoji('information_source')}  To view your suites, visit ${chalk.blue(`https://app.saucelabs.com/builds/vdc/${buildId}`)}'`);
+            log.info(`${emoji('information_source')}  To view your suites, visit ${chalk.blue(`https://app.saucelabs.com/builds/vdc/${buildId}`)}`);
           }
           startPrintDots();
         }
@@ -486,9 +524,9 @@ async function run (argv) {
                   runningJobs--;
                   runInterval();
                 })
-                .catch(function () {
+                .catch(function (reason) {
                   // TODO: Make a parameter to allow user to just continue until all are done
-                  reject(`Your suites did not pass.`);
+                  reject(`Your suites errored: ${reason}`);
                 });
             currentSuiteIndex++;
           }
@@ -502,7 +540,13 @@ async function run (argv) {
       log.info(`${emoji('white_check_mark')} Finished running ${sauceRunnerJson.suites.length} suites. All passed.`);
     }
   } catch (e) {
+    process.stdout.write('\n');
     log.errorAndThrow(e);
+  } finally {
+    if (scTunnel) {
+      log.info(`${emoji('information_source')}  Closing SauceConnect Tunnel`);
+      await scTunnel.close();
+    }
   }
 }
 
@@ -513,5 +557,7 @@ async function run (argv) {
 // TODO: NPM Package command line parameter
 // TODO: Add bin to package.json
 // TODO: Add a CI.js library to get build-id and git commit
+// TODO: Add a cleanup task
+// TODO: Change browser format to "chrome@version" instead of "chrome:version"
 
 module.exports = run;

@@ -5,3 +5,5 @@ __$$cypress-saucelabs$$__.zip
 sauce-runner.json
 __assets__
 __$$cypress-saucelabs$$__
+eamples/local/cypress/videos/
+cypress/videos/*
