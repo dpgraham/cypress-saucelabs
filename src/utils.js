@@ -230,6 +230,21 @@ async function checkUser ({sauceUrl, sauceUsername, log, sauceConcurrency}) {
   return user;
 }
 
+async function uploadZipToApplicationStorage ({sauceUrl, zipFileOut, log}) {
+  // Upload the zip file to Application Storage
+  log.info(`${emoji('rocket')} Uploading zip file to Sauce Labs Application Storage`);
+  const zipFileStream = fs.createReadStream(zipFileOut);
+  const formData = new FormData();
+  formData.append('payload', zipFileStream);
+  const endpoint = `${sauceUrl}/v1/storage/upload`;
+  const upload = await axios.post(endpoint, formData, {
+    headers: formData.getHeaders(),
+    maxBodyLength: 3 * 1024 * 1024 * 1024,
+  });
+  const {id: storageId} = upload.data.item;
+  log.info(`${emoji('white_check_mark')} Done uploading to Application Storage with storage ID ${chalk.blue(storageId)}`);
+}
+
 
 module.exports = {
   startPrintDots, stopPrintDots,
@@ -238,4 +253,5 @@ module.exports = {
   runJob,
   createCypressConfig,
   checkUser,
+  uploadZipToApplicationStorage,
 }
