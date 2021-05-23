@@ -8,6 +8,7 @@ const { get:emoji } = require('node-emoji');
 const chalk = require('chalk');
 const axios = require('axios');
 const { retryInterval } = require('asyncbox');
+const FormData = require('form-data');
 
 let dotPrintingInterval;
 
@@ -241,8 +242,9 @@ async function uploadZipToApplicationStorage ({sauceUrl, zipFileOut, log}) {
     headers: formData.getHeaders(),
     maxBodyLength: 3 * 1024 * 1024 * 1024,
   });
-  const {id: storageId} = upload.data.item;
-  log.info(`${emoji('white_check_mark')} Done uploading to Application Storage with storage ID ${chalk.blue(storageId)}`);
+  const { id } = upload.data.item;
+  log.info(`${emoji('white_check_mark')} Done uploading to Application Storage with storage ID ${chalk.blue(id)}`);
+  return id;
 }
 
 

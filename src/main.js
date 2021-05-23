@@ -3,14 +3,12 @@ const path = require('path');
 const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');
 const fs = require('fs');
-const FormData = require('form-data');
 const { logger } = require('appium-support');
 const { get:emoji } = require('node-emoji');
 const chalk = require('chalk');
 const { startPrintDots, stopPrintDots, createProjectZip, startTunnel, runJob, createCypressConfig, checkUser, uploadZipToApplicationStorage } = require('./utils');
 
 const defaultCypressVersion = require('../package.json').version;
-const { default: axios } = require('axios');
 
 const log = logger.getLogger();
 
@@ -337,18 +335,6 @@ async function run (argv) {
 
       // Upload the zip file to Application Storage
       const storageId = await uploadZipToApplicationStorage({zipFileOut, log, sauceUrl});
-
-      /*log.info(`${emoji('rocket')} Uploading zip file to Sauce Labs Application Storage`);
-      const zipFileStream = fs.createReadStream(zipFileOut);
-      const formData = new FormData();
-      formData.append('payload', zipFileStream);
-      const endpoint = `${sauceUrl}/v1/storage/upload`;
-      const upload = await axios.post(endpoint, formData, {
-        headers: formData.getHeaders(),
-        maxBodyLength: 3 * 1024 * 1024 * 1024,
-      });
-      const {id: storageId} = upload.data.item;
-      log.info(`${emoji('white_check_mark')} Done uploading to Application Storage with storage ID ${chalk.blue(storageId)}`);*/
 
       // Start a SauceConnect tunnel
       const sauceTunnelData = sauceTunnel ? await startTunnel(sauceUsername, sauceAccessKey, log) : null;
