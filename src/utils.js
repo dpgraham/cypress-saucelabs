@@ -147,9 +147,70 @@ async function runJob ({
   return passed;
 }
 
+async function createCypressConfig ({conf, workingDir, log, name}) {
+  let cypressConfig = {};
+  if (conf.configFile !== 'false') {
+    const pathToConfig = path.join(workingDir, conf.configFile);
+    if (!fs.existsSync(pathToConfig)) {
+      log.errorAndThrow(`Could not find a Cypress configuration file, exiting.
+
+We looked but did not find a ${pathToConfig} file in this folder: ${workingDir}`);
+    }
+    try {
+      cypressConfig = {...cypressConfig, ...require(pathToConfig)};
+    } catch (e) {
+      log.errorAndThrow(`Cypress config file at '${pathToConfig}' contains invalid JSON: ${e.message}`);
+    }
+  }
+
+  for (const keyValuePair of conf.config.trim().split(',')) {
+    if (keyValuePair === '') {continue;}
+    const [configKey, configValue] = keyValuePair.split('=');
+    if (!configValue) {
+      log.errorAndThrow(`Encountered an error while parsing the argument 'config'.
+        
+You passed: '${keyValuePair}'. Must provide a key and value separated by = sign`);
+    }
+    cypressConfig[configKey] = configValue;
+  }
+
+  // ENVIRONMENT VARIABLES
+  let cypressEnv = {};
+
+  const pathToCypressEnv = path.join(process.cwd(), 'cypress.env.json');
+  if (fs.existsSync(pathToCypressEnv)) {
+    try {
+      cypressEnv = {...cypressEnv, ...JSON.parse(require(pathToCypressEnv))};
+    } catch (e) {
+      log.errorAndThrow(`Cypress env file at '${pathToCypressEnv}' contains invalid JSON: ${e.message}`);
+    }
+  }
+
+  for (const envPair of conf.env.trim().split(',')) {
+    if (envPair === '') {continue;}
+    const [envKey, envValue] = envPair.split('=');
+    if (!envValue) {
+      log.errorAndThrow(`Encountered an error while parsing the argument 'env'.
+        
+You passed: '${envPair}'. Must provide a key and value separated by = sign`);
+    }
+    cypressEnv[envKey] = envValue;
+  }
+
+  cypressConfig.env = {...cypressConfig.env, ...cypressEnv};
+
+  // WRITE CYPRESS CONFIG TO JSON FILE
+  const cypressFileName = `__$$cypress-saucelabs$$__` + (name ? `${name}__` : '') + '.json';
+  const cypressFilePath = path.join(workingDir, cypressFileName);
+  fs.writeFileSync(cypressFilePath, JSON.stringify(cypressConfig, null, 2));
+  console.log(cypressFilePath);
+  return cypressFilePath;
+}
+
 module.exports = {
   startPrintDots, stopPrintDots,
   createProjectZip,
   startTunnel,
   runJob,
+  createCypressConfig,
 }
