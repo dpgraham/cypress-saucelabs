@@ -4,6 +4,6 @@ __$$cypress-saucelabs$$__.zip
 .DS_Store
 sauce-runner.json
 __assets__
-__$$cypress-saucelabs$$__
+__$$cypress-saucelabs$$__*
 eamples/local/cypress/videos/
 cypress/videos/*

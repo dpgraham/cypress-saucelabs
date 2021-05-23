@@ -3,14 +3,12 @@ const path = require('path');
 const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');
 const fs = require('fs');
-const ignore = require('ignore');
-const AdmZip = require('adm-zip');
 const FormData = require('form-data');
 const { retryInterval } = require('asyncbox');
 const { logger } = require('appium-support');
 const { get:emoji } = require('node-emoji');
 const chalk = require('chalk');
-const { startPrintDots, stopPrintDots } = require('./utils');
+const { startPrintDots, stopPrintDots, createProjectZip } = require('./utils');
 
 const defaultCypressVersion = require('../package.json').version;
 const { default: axios } = require('axios');
@@ -58,6 +56,10 @@ Runs Cypress tests in the Sauce Labs cloud
         alias: ['tunnel'],
         type: 'boolean',
         description: `open up a SauceConnect tunnel so that the Sauce Labs VM can access localhost`,
+      })
+      .option('sauce-config', {
+        type: 'string',
+        description: `a js or json file that can be used to define a group of jobs`,
       })
       .option('browser', {
         alias: 'b',
@@ -173,6 +175,7 @@ async function run (argv) {
       sauceConcurrency = 2,
       sauceRegion,
       sauceTunnel,
+      sauceConfig,
       project = './',
       config = '',
       configFile = './cypress.json',
@@ -237,81 +240,116 @@ async function run (argv) {
 
     const workingDir = path.join(process.cwd(), project);
 
-    const sauceBrowserList = [];
-    // TODO: Add sauce-config.js(on) support
+    const suiteList = [];
+
+    let sauceConfiguration = null;
+    if (sauceConfig) {
+      if (!fs.existsSync(path.join(workingDir, sauceConfig))) {
+        log.errorAndThrow(`No such file ${sauceConfig}`);
+      }
+      sauceConfiguration = require(path.join(workingDir, sauceConfig));
+    } else {
+      if (fs.existsSync(path.join(workingDir, 'sauce.conf.json'))) {
+        sauceConfiguration = require(path.join(workingDir, 'sauce.conf.json'));
+      } else if (fs.existsSync(path.join(workingDir, 'sauce.conf.js'))) {
+        sauceConfiguration = require(path.join(workingDir, 'sauce.conf.js'));
+      }
+    }
+
     // const supportedBrowsers = axios.get(`${sauceUrl}/rest/v1/info/platforms/all?resolutions=true`);
-    for (const browserInfo of browser.split(',')) {
-      let [browserName, browserVersion, os, screenResolution] = browserInfo.trim().split(':');
-      // TODO: Validate the browser names, versions and platforms
-      if (os && os.toLowerCase().startsWith('mac')) {
-        log.error(`Platform '${os}' is not supported in Sauce Cloud. ` +
-            `If you'd like to see this, request it at https://saucelabs.ideas.aha.io/`);
+    const entries = sauceConfiguration ? Object.entries(sauceConfiguration) : [[null, null]];
+    for (let [name, conf] of entries) {
+      conf = {
+        browser,
+        project,
+        config,
+        configFile,
+        env,
+        ...conf,
+      };
+      let suite = {};
+      for (const browserInfo of conf.browser.split(',')) {
+        let [browserName, browserVersion, os, screenResolution] = browserInfo.trim().split(':');
+        // TODO: Validate the browser names, versions and platforms
+        // TODO: Add browser aliasing
+        if (os && os.toLowerCase().startsWith('mac')) {
+          log.error(`Platform '${os}' is not supported in Sauce Cloud. ` +
+              `If you'd like to see this, request it at https://saucelabs.ideas.aha.io/`);
+        }
+        suite.browser = [
+          browserName,
+          browserVersion || '',
+          os || 'Windows 10', // TODO: Allow generic Windows or Win and convert it to a good default
+          screenResolution,
+        ];
       }
-      sauceBrowserList.push([
-        browserName,
-        browserVersion || '',
-        os || 'Windows 10', // TODO: Allow generic Windows or Win and convert it to a good default
-        screenResolution,
-      ]);
+
+      // GENERATE CYPRESS CONFIG
+      let cypressConfig = {};
+
+      if (conf.configFile !== 'false') {
+        const pathToConfig = path.join(workingDir, conf.configFile);
+        if (!fs.existsSync(pathToConfig)) {
+          log.errorAndThrow(`Could not find a Cypress configuration file, exiting.
+
+    We looked but did not find a ${pathToConfig} file in this folder: ${workingDir}`);
+        }
+        try {
+          cypressConfig = {...cypressConfig, ...require(pathToConfig)};
+        } catch (e) {
+          log.errorAndThrow(`Cypress config file at '${pathToConfig}' contains invalid JSON: ${e.message}`);
+        }
+      }
+
+      for (const keyValuePair of conf.config.trim().split(',')) {
+        if (keyValuePair === '') {continue;}
+        const [configKey, configValue] = keyValuePair.split('=');
+        if (!configValue) {
+          log.errorAndThrow(`Encountered an error while parsing the argument 'config'.
+            
+    You passed: '${keyValuePair}'. Must provide a key and value separated by = sign`);
+        }
+        cypressConfig[configKey] = configValue;
+      }
+
+      // ENVIRONMENT VARIABLES
+      let cypressEnv = {};
+
+      const pathToCypressEnv = path.join(process.cwd(), 'cypress.env.json');
+      if (fs.existsSync(pathToCypressEnv)) {
+        try {
+          cypressEnv = {...cypressEnv, ...JSON.parse(require(pathToCypressEnv))};
+        } catch (e) {
+          log.errorAndThrow(`Cypress env file at '${pathToCypressEnv}' contains invalid JSON: ${e.message}`);
+        }
+      }
+
+      for (const envPair of conf.env.trim().split(',')) {
+        if (envPair === '') {continue;}
+        const [envKey, envValue] = envPair.split('=');
+        if (!envValue) {
+          log.errorAndThrow(`Encountered an error while parsing the argument 'env'.
+            
+    You passed: '${envPair}'. Must provide a key and value separated by = sign`);
+        }
+        cypressEnv[envKey] = envValue;
+      }
+
+      cypressConfig.env = {...cypressConfig.env, ...cypressEnv};
+
+      // WRITE CYPRESS CONFIG TO JSON FILE
+      const cypressFileName = `__$$cypress-saucelabs$$__` + (name ? `${name}__` : '') + '.json';
+      const cypressFilePath = path.join(workingDir, cypressFileName);
+      fs.writeFileSync(cypressFilePath, JSON.stringify(cypressConfig, null, 2));
+      suite.configFile = cypressFilePath;
+      suiteList.push(suite);
+
+      // TODO: Add a flag to set pre-existing tunnelId.... check open tunnels before running tests
+      if (!sauceTunnel && cypressConfig.baseUrl && cypressConfig.baseUrl.includes('localhost')) {
+        log.info(`${emoji('information_source')} Looks like you're running on localhost '${cypressConfig.baseUrl}'. ` +
+          `To allow Sauce Labs VM's to access your localhost, set '--sauce-tunnel true' in your command line arguments`);
+      }
     }
-
-    // GENERATE CYPRESS CONFIG
-    let cypressConfig = {};
-
-    if (configFile !== 'false') {
-      const pathToConfig = path.join(workingDir, configFile);
-      if (!fs.existsSync(pathToConfig)) {
-        log.errorAndThrow(`Could not find a Cypress configuration file, exiting.
-
-  We looked but did not find a ${pathToConfig} file in this folder: ${workingDir}`);
-      }
-      try {
-        cypressConfig = {...cypressConfig, ...require(pathToConfig)};
-      } catch (e) {
-        log.errorAndThrow(`Cypress config file at '${pathToConfig}' contains invalid JSON: ${e.message}`);
-      }
-    }
-
-    for (const keyValuePair of config.trim().split(',')) {
-      if (keyValuePair === '') {continue;}
-      const [configKey, configValue] = keyValuePair.split('=');
-      if (!configValue) {
-        log.errorAndThrow(`Encountered an error while parsing the argument 'config'.
-          
-  You passed: '${keyValuePair}'. Must provide a key and value separated by = sign`);
-      }
-      cypressConfig[configKey] = configValue;
-    }
-
-    // ENVIRONMENT VARIABLES
-    let cypressEnv = {};
-
-    const pathToCypressEnv = path.join(process.cwd(), 'cypress.env.json');
-    if (fs.existsSync(pathToCypressEnv)) {
-      try {
-        cypressEnv = {...cypressEnv, ...JSON.parse(require(pathToCypressEnv))};
-      } catch (e) {
-        log.errorAndThrow(`Cypress env file at '${pathToCypressEnv}' contains invalid JSON: ${e.message}`);
-      }
-    }
-
-    for (const envPair of env.trim().split(',')) {
-      if (envPair === '') {continue;}
-      const [envKey, envValue] = envPair.split('=');
-      if (!envValue) {
-        log.errorAndThrow(`Encountered an error while parsing the argument 'env'.
-          
-  You passed: '${envPair}'. Must provide a key and value separated by = sign`);
-      }
-      cypressEnv[envKey] = envValue;
-    }
-
-    cypressConfig.env = {...cypressConfig.env, ...cypressEnv};
-
-    // WRITE CYPRESS CONFIG TO JSON FILE
-    const cypressFileName = `__$$cypress-saucelabs$$__.json`;
-    const cypressFilePath = path.join(workingDir, cypressFileName);
-    fs.writeFileSync(cypressFilePath, JSON.stringify(cypressConfig, null, 2));
 
     if (!ciBuildId) {
       // TODO: Auto-detect the CI build ID
@@ -334,11 +372,11 @@ async function run (argv) {
         region: 'us-west-1', // TODO: Let user decide region here
       },
       cypress: {
-        configFile: path.relative(workingDir, cypressFilePath),
+        configFile: path.relative(workingDir, suiteList[0].configFile), // TODO: This will be replaced once ship new Cypress Runner
         version: sauceCypressVersion || defaultCypressVersion,
       },
-      suites: sauceBrowserList.map(([browserName, browserVersion, os, screenResolution], index) => ({
-        name: `SUITE ${index + 1} of ${sauceBrowserList.length}: ${browserName} -- ${browserVersion || 'latest'} -- ${os}` + (screenResolution ? ` -- ${screenResolution}` : ''),
+      suites: suiteList.map(({browser: [browserName, browserVersion, os, screenResolution]}, index) => ({
+        name: `SUITE ${index + 1} of ${suiteList.length}: ${browserName} -- ${browserVersion || 'latest'} -- ${os}` + (screenResolution ? ` -- ${screenResolution}` : ''),
         browser: browserName,
         browserVersion,
         platformName: os,
@@ -366,40 +404,10 @@ async function run (argv) {
     if (sauceLocal) {
       // TODO: Add local mode that runs "sauce-cypress-runner" (need to publish "sauce-cypress-runner" to NPM)
     } else {
-      const sauceIgnoreDir = path.join(workingDir, '.sauceignore');
-      if (!fs.existsSync(sauceIgnoreDir)) {
-        log.info(`${emoji('information_source')} Writing .sauceignore file to '${sauceIgnoreDir}'`);
-        fs.copyFileSync(path.join(__dirname, '..', '.sauceignore'), sauceIgnoreDir);
-      }
-
       // ZIP THE PROJECT
       log.info(`${emoji('package')} Bundling contents of ${chalk.blue(workingDir)} to zip file`);
-      const zipFileOut = '__$$cypress-saucelabs$$__.zip';
-      const ig = ignore()
-          .add(['.sauceignore', '.git', zipFileOut])
-          .add(fs.readFileSync(sauceIgnoreDir).toString());
-      let filenames = [];
-      (function recursiveReaddirSync (dir) {
-        const files = fs.readdirSync(dir);
-        for (const file of files) {
-          try {
-            if (fs.lstatSync(path.join(dir, file)).isDirectory()) {
-              recursiveReaddirSync(path.join(dir, file));
-            } else {
-              filenames.push(path.relative(workingDir, path.join(dir, file)));
-            }
-          } catch (ign) { }
-        }
-      })(workingDir);
-      filenames = ig.filter(filenames);
-
-      const zip = new AdmZip();
-      for (const filename of filenames) {
-        const absoluteFilePath = path.join(workingDir, filename);
-        const relativeFilePath = path.relative(workingDir, absoluteFilePath);
-        zip.addLocalFile(absoluteFilePath, path.dirname(relativeFilePath), path.basename(relativeFilePath));
-      }
-      zip.writeZip(zipFileOut);
+      const zipFileOut = path.join(workingDir, '__$$cypress-saucelabs$$__.zip');
+      await createProjectZip(zipFileOut, workingDir);
       log.info(`${emoji('white_check_mark')} Wrote zip file to '${chalk.blue(path.join(workingDir, zipFileOut))}'`);
 
       // Upload the zip file to Application Storage
@@ -413,17 +421,9 @@ async function run (argv) {
         maxBodyLength: 3 * 1024 * 1024 * 1024,
       });
       const {id: storageId} = upload.data.item;
-      log.info(`${emoji('white_check_mark')} Done uploading to Application Storage with storage ID ${chalk.green(storageId)}`);
-
-      // TODO: Add a flag to set pre-existing tunnelId.... check open tunnels before running tests
-
-      if (!sauceTunnel && cypressConfig.baseUrl && cypressConfig.baseUrl.includes('localhost')) {
-        log.info(`${emoji('information_source')} Looks like you're running on localhost '${cypressConfig.baseUrl}'. ` +
-          `To allow Sauce Labs VM's to access your localhost, set '--sauce-tunnel true' in your command line arguments`);
-      }
+      log.info(`${emoji('white_check_mark')} Done uploading to Application Storage with storage ID ${chalk.blue(storageId)}`);
 
       let tunnelName;
-      let tunnelIdentifier;
       if (sauceTunnel) {
         const myAccount = new SauceLabs({user: SAUCE_USERNAME, key: SAUCE_ACCESS_KEY});
         const scLogs = [];
@@ -437,7 +437,7 @@ async function run (argv) {
             tunnelIdentifier: tunnelName,
             // TODO: Let user set other SauceConnect parameters
           });
-          log.info(`${emoji('white_check_mark')} Started SauceConnect tunnel successfully with tunnel ID ${chalk.green(tunnelIdentifier)}`);
+          log.info(`${emoji('white_check_mark')} Started SauceConnect tunnel successfully with tunnel ID ${chalk.blue(tunnelName)}`);
         } catch (e) {
           log.info(scLogs.join('\n'));
           log.errorAndThrow('Failed to start tunnel', e);
@@ -559,5 +559,6 @@ async function run (argv) {
 // TODO: Add a CI.js library to get build-id and git commit
 // TODO: Add a cleanup task
 // TODO: Change browser format to "chrome@version" instead of "chrome:version"
+// TODO: Add a utils
 
 module.exports = run;
