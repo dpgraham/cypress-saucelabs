@@ -2,7 +2,7 @@
   "chromium": {
       "browser": "chrome,microsoftedge"
   },
-  "firefox": {
-      "browser": "firefox"
+  "edge": {
+      "browser": "microsoftedge"
   }
 }

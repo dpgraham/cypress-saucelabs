@@ -6,7 +6,7 @@ const fs = require('fs');
 const { logger } = require('appium-support');
 const { get:emoji } = require('node-emoji');
 const chalk = require('chalk');
-const { startPrintDots, stopPrintDots, createProjectZip, startTunnel, runJob, createCypressConfig, checkUser, uploadZipToApplicationStorage } = require('./utils');
+const { createProjectZip, startTunnel, createCypressConfig, checkUser, uploadZipToApplicationStorage, runAllJobs, getSauceConfig, getSauceUrl } = require('./utils');
 
 const defaultCypressVersion = require('../package.json').version;
 
@@ -197,45 +197,19 @@ async function run (argv) {
           `paste your Access Key and provide it in the command: "--sauce-access-key YOUR_ACCESS_KEY"`);
     }
 
-    // Determine region to run tests
-    let region = 'us-west-1';
-    if (sauceRegion === 'us' || sauceRegion === 'us-west-1') {
-      region = 'us-west-1';
-    } else if (sauceRegion === 'eu' || sauceRegion === 'eu-central-1') {
-      region = 'eu-central-1';
-    } else if (sauceRegion === 'staging') {
-      region = 'staging';
-    } else if (sauceRegion) {
-      log.errorAndThrow(`Unsupported region ${sauceRegion}`);
-    }
-    let sauceUrl = `https://${sauceUsername}:${sauceAccessKey}@api.${region}.saucelabs.com`;
-    if (region === 'staging') {
-      sauceUrl = `https://${sauceUsername}:${sauceAccessKey}@api.${region}.saucelabs.net`;
-    }
+    // Get Sauce API base URL
+    const sauceUrl = getSauceUrl({sauceRegion, sauceUsername, sauceAccessKey});
 
     // Look at the users info
     await checkUser({sauceUrl, sauceUsername, sauceAccessKey, sauceConcurrency});
 
-
     const workingDir = path.join(process.cwd(), project);
 
-    const suiteList = [];
-
-    let sauceConfiguration = null;
-    if (sauceConfig) {
-      if (!fs.existsSync(path.join(workingDir, sauceConfig))) {
-        log.errorAndThrow(`No such file ${sauceConfig}`);
-      }
-      sauceConfiguration = require(path.join(workingDir, sauceConfig));
-    } else {
-      if (fs.existsSync(path.join(workingDir, 'sauce.conf.json'))) {
-        sauceConfiguration = require(path.join(workingDir, 'sauce.conf.json'));
-      } else if (fs.existsSync(path.join(workingDir, 'sauce.conf.js'))) {
-        sauceConfiguration = require(path.join(workingDir, 'sauce.conf.js'));
-      }
-    }
+    let sauceConfiguration = getSauceConfig(sauceConfig, workingDir);
+    
 
     // const supportedBrowsers = axios.get(`${sauceUrl}/rest/v1/info/platforms/all?resolutions=true`);
+    const suiteList = [];
     const entries = sauceConfiguration ? Object.entries(sauceConfiguration) : [[null, null]];
     for (let [name, conf] of entries) {
       conf = {
@@ -246,8 +220,8 @@ async function run (argv) {
         env,
         ...conf,
       };
-      let suite = {};
       for (const browserInfo of conf.browser.split(',')) {
+        let suite = {};
         let [browserName, browserVersion, os, screenResolution] = browserInfo.trim().split(':');
         // TODO: Validate the browser names, versions and platforms
         // TODO: Add browser aliasing
@@ -261,11 +235,11 @@ async function run (argv) {
           os || 'Windows 10', // TODO: Allow generic Windows or Win and convert it to a good default
           screenResolution,
         ];
-      }
 
-      // GENERATE CYPRESS CONFIG
-      suite.configFile = await createCypressConfig({conf, workingDir, log, name});
-      suiteList.push(suite);
+        // GENERATE CYPRESS CONFIG
+        suite.configFile = await createCypressConfig({conf, workingDir, log, name});
+        suiteList.push(suite);
+      }
 
       // TODO: Add a flag to set pre-existing tunnelId.... check open tunnels before running tests
       if (!sauceTunnel && cypressConfig.baseUrl && cypressConfig.baseUrl.includes('localhost')) {
@@ -279,7 +253,7 @@ async function run (argv) {
       ciBuildId = `Cypress Build -- ${+new Date()}`;
     }
 
-    // CREATE SAUCE-RUNNER.JSON
+    // Create "sauce-runner.json"
     const sauceRunnerJson = {
       apiVersion: 'v1alpha',
       kind: 'cypress',
@@ -298,13 +272,14 @@ async function run (argv) {
         configFile: path.relative(workingDir, suiteList[0].configFile), // TODO: This will be replaced once ship new Cypress Runner
         version: sauceCypressVersion || defaultCypressVersion,
       },
-      suites: suiteList.map(({browser: [browserName, browserVersion, os, screenResolution]}, index) => ({
+      suites: suiteList.map(({browser: [browserName, browserVersion, os, screenResolution], configFile}, index) => ({
         name: `SUITE ${index + 1} of ${suiteList.length}: ${browserName} -- ${browserVersion || 'latest'} -- ${os}` + (screenResolution ? ` -- ${screenResolution}` : ''),
         browser: browserName,
         browserVersion,
         platformName: os,
         screenResolution,
         config: {},
+        configFile, // TODO: Put in a PR to make this one be supported by sauce-cypress-runner
       })),
     };
     fs.writeFileSync(path.join(workingDir, 'sauce-runner.json'), JSON.stringify(sauceRunnerJson, null, 2));
@@ -327,7 +302,7 @@ async function run (argv) {
     if (sauceLocal) {
       // TODO: Add local mode that runs "sauce-cypress-runner" (need to publish "sauce-cypress-runner" to NPM)
     } else {
-      // ZIP THE PROJECT
+      // Zip the project
       log.info(`${emoji('package')} Bundling contents of ${chalk.blue(workingDir)} to zip file`);
       const zipFileOut = path.join(workingDir, '__$$cypress-saucelabs$$__.zip');
       await createProjectZip(zipFileOut, workingDir);
@@ -341,49 +316,18 @@ async function run (argv) {
       const { tunnelName } = sauceTunnelData;
       scTunnel = sauceTunnelData.scTunnel;
 
-      let currentSuiteIndex = 0;
-      let runningJobs = 0;
-      const runAllJobsPromise = new Promise((resolve, reject) => {
-        function runInterval () {
-          while (runningJobs < Math.min(sauceConcurrency, sauceRunnerJson.suites.length)) {
-            if (!sauceRunnerJson.suites[currentSuiteIndex]) {
-              resolve();
-              return;
-            }
-            runningJobs++;
-            runJob({
-              suite: sauceRunnerJson.suites[currentSuiteIndex],
-              tunnelName,
-              sauceUsername,
-              sauceAccessKey,
-              storageId,
-              ciBuildId,
-              frameworkVersion: sauceRunnerJson.cypress.version,
-              sauceUrl,
-              log
-            }).then(function (passed) {
-              if (!passed) {
-                // TODO: Make a parameter to allow user to just continue until all are done
-                reject(`Your suites did not pass`);
-                return;
-              }
-              runningJobs--;
-              runInterval();
-            })
-            .catch(function (reason) {
-              // TODO: Make a parameter to allow user to just continue until all are done
-              reject(`Your suites errored: ${reason}`);
-            });
-            currentSuiteIndex++;
-          }
-        }
-        runInterval();
+      // Run all of the jobs now
+      await runAllJobs({
+        sauceUrl,
+        sauceConcurrency,
+        sauceUsername,
+        sauceAccessKey,
+        sauceRunnerJson,
+        tunnelName,
+        storageId,
+        log,
+        ciBuildId,
       });
-      const numberOfSuites =  sauceRunnerJson.suites.length;
-      log.info(`${emoji('rocket')} Running ${numberOfSuites} suites.`);
-      await runAllJobsPromise;
-      stopPrintDots();
-      log.info(`${emoji('white_check_mark')} Finished running ${sauceRunnerJson.suites.length} suites. All passed.`);
     }
   } catch (e) {
     process.stdout.write('\n');

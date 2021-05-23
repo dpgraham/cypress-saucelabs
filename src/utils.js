@@ -24,6 +24,7 @@ function stopPrintDots () {
 }
 
 function createProjectZip (zipFileOut, workingDir) {
+  startPrintDots();
   const sauceIgnoreDir = path.join(workingDir, '.sauceignore');
   if (!fs.existsSync(sauceIgnoreDir)) {
     log.info(`${emoji('information_source')} Writing .sauceignore file to '${sauceIgnoreDir}'`);
@@ -55,6 +56,7 @@ function createProjectZip (zipFileOut, workingDir) {
     zip.addLocalFile(absoluteFilePath, path.dirname(relativeFilePath), path.basename(relativeFilePath));
   }
   zip.writeZip(zipFileOut);
+  stopPrintDots();
 }
 
 async function startTunnel (username, accessKey, log) {
@@ -64,6 +66,7 @@ async function startTunnel (username, accessKey, log) {
   log.info(`${emoji('rocket')} Starting a SauceConnect tunnel`);
   tunnelName = uuidV4();
   try {
+    startPrintDots();
     const scTunnel = await myAccount.startSauceConnect({
       logger: (stdout) => {
         scLogs.push(stdout);
@@ -71,6 +74,7 @@ async function startTunnel (username, accessKey, log) {
       tunnelIdentifier: tunnelName,
       // TODO: Let user set other SauceConnect parameters
     });
+    stopPrintDots();
     log.info(`${emoji('white_check_mark')} Started SauceConnect tunnel successfully with tunnel ID ${chalk.blue(tunnelName)}`);
     return {tunnelName, scTunnel};
   } catch (e) {
@@ -132,9 +136,9 @@ async function runJob ({
     loggedBuild = true;
     const buildId = await retryInterval(5, 5000, async () => getBuildId(jobId));
     if (buildId) {
+      startPrintDots();
       log.info(`${emoji('information_source')}  To view your suites, visit ${chalk.blue(`https://app.saucelabs.com/builds/vdc/${buildId}`)}`);
     }
-    startPrintDots();
   }
 
   // TODO: Add a timeout option (right now it's just 30 minutes);
@@ -234,6 +238,7 @@ async function checkUser ({sauceUrl, sauceUsername, log, sauceConcurrency}) {
 async function uploadZipToApplicationStorage ({sauceUrl, zipFileOut, log}) {
   // Upload the zip file to Application Storage
   log.info(`${emoji('rocket')} Uploading zip file to Sauce Labs Application Storage`);
+  startPrintDots();
   const zipFileStream = fs.createReadStream(zipFileOut);
   const formData = new FormData();
   formData.append('payload', zipFileStream);
@@ -243,10 +248,99 @@ async function uploadZipToApplicationStorage ({sauceUrl, zipFileOut, log}) {
     maxBodyLength: 3 * 1024 * 1024 * 1024,
   });
   const { id } = upload.data.item;
+  stopPrintDots();
   log.info(`${emoji('white_check_mark')} Done uploading to Application Storage with storage ID ${chalk.blue(id)}`);
   return id;
 }
 
+async function runAllJobs ({
+  sauceConcurrency,
+  sauceUrl,
+  sauceUsername,
+  sauceAccessKey,
+  sauceRunnerJson,
+  tunnelName,
+  storageId,
+  log,
+  ciBuildId,
+}) {
+  let currentSuiteIndex = 0;
+  let runningJobs = 0;
+  const runAllJobsPromise = new Promise((resolve, reject) => {
+    function runInterval () {
+      while (runningJobs < Math.min(sauceConcurrency, sauceRunnerJson.suites.length)) {
+        if (!sauceRunnerJson.suites[currentSuiteIndex]) {
+          resolve();
+          return;
+        }
+        runningJobs++;
+        runJob({
+          suite: sauceRunnerJson.suites[currentSuiteIndex],
+          tunnelName,
+          sauceUsername,
+          sauceAccessKey,
+          storageId,
+          ciBuildId,
+          frameworkVersion: sauceRunnerJson.cypress.version,
+          sauceUrl,
+          log
+        }).then(function (passed) {
+          if (!passed) {
+            // TODO: Make a parameter to allow user to just continue until all are done
+            reject(`Your suites did not pass`);
+            return;
+          }
+          runningJobs--;
+          runInterval();
+        })
+        .catch(function (reason) {
+          // TODO: Make a parameter to allow user to just continue until all are done
+          reject(`Your suites errored: ${reason}`);
+        });
+        currentSuiteIndex++;
+      }
+    }
+    runInterval();
+  });
+  const numberOfSuites =  sauceRunnerJson.suites.length;
+  log.info(`${emoji('rocket')} Running ${numberOfSuites} suites.`);
+  await runAllJobsPromise;
+  stopPrintDots();
+  log.info(`${emoji('white_check_mark')} Finished running ${sauceRunnerJson.suites.length} suites. All passed.`);
+}
+
+function getSauceConfig (sauceConfig, workingDir) {
+  if (sauceConfig) {
+    if (!fs.existsSync(path.join(workingDir, sauceConfig))) {
+      log.errorAndThrow(`No such file ${sauceConfig}`);
+    }
+    return require(path.join(workingDir, sauceConfig));
+  } else {
+    if (fs.existsSync(path.join(workingDir, 'sauce.conf.json'))) {
+      return require(path.join(workingDir, 'sauce.conf.json'));
+    } else if (fs.existsSync(path.join(workingDir, 'sauce.conf.js'))) {
+      return require(path.join(workingDir, 'sauce.conf.js'));
+    }
+  }
+}
+
+function getSauceUrl ({sauceUsername, sauceAccessKey, sauceRegion}) {
+  let region = 'us-west-1';
+  if (sauceRegion === 'us' || sauceRegion === 'us-west-1') {
+    region = 'us-west-1';
+  } else if (sauceRegion === 'eu' || sauceRegion === 'eu-central-1') {
+    region = 'eu-central-1';
+  } else if (sauceRegion === 'staging') {
+    region = 'staging';
+  } else if (sauceRegion) {
+    log.errorAndThrow(`Unsupported region ${sauceRegion}`);
+  }
+  let sauceUrl = `https://${sauceUsername}:${sauceAccessKey}@api.${region}.saucelabs.com`;
+  if (region === 'staging') {
+    sauceUrl = `https://${sauceUsername}:${sauceAccessKey}@api.${region}.saucelabs.net`;
+  }
+  return sauceUrl;
+}
 
 module.exports = {
   startPrintDots, stopPrintDots,
@@ -256,4 +350,7 @@ module.exports = {
   createCypressConfig,
   checkUser,
   uploadZipToApplicationStorage,
+  runAllJobs,
+  getSauceConfig,
+  getSauceUrl,
 }
