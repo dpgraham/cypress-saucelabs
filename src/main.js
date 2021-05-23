@@ -7,7 +7,7 @@ const FormData = require('form-data');
 const { logger } = require('appium-support');
 const { get:emoji } = require('node-emoji');
 const chalk = require('chalk');
-const { startPrintDots, stopPrintDots, createProjectZip, startTunnel, runJob, createCypressConfig } = require('./utils');
+const { startPrintDots, stopPrintDots, createProjectZip, startTunnel, runJob, createCypressConfig, checkUser } = require('./utils');
 
 const defaultCypressVersion = require('../package.json').version;
 const { default: axios } = require('axios');
@@ -210,30 +210,14 @@ async function run (argv) {
     } else if (sauceRegion) {
       log.errorAndThrow(`Unsupported region ${sauceRegion}`);
     }
-    let sauceUrl = `https://${SAUCE_USERNAME}:${SAUCE_ACCESS_KEY}@api.${region}.saucelabs.com`;
+    let sauceUrl = `https://${sauceUsername}:${sauceAccessKey}@api.${region}.saucelabs.com`;
     if (region === 'staging') {
-      sauceUrl = `https://${SAUCE_USERNAME}:${SAUCE_ACCESS_KEY}@api.${region}.saucelabs.net`;
+      sauceUrl = `https://${sauceUsername}:${sauceAccessKey}@api.${region}.saucelabs.net`;
     }
 
     // Look at the users info
-    const userUrl = `${sauceUrl}/rest/v1/users/${SAUCE_USERNAME}`;
-    const { user_type: userType, concurrency_limit: concurrencyLimit } = (await axios.get(userUrl)).data;
-    if (userType === 'free') {
-      log.error(`${emoji('x')} Your Sauce Labs account ${SAUCE_USERNAME} has expired. ` +
-          `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
-    }
-    if (userType === 'free_trial' || userType === 'freemium') {
-      log.info(`${emoji('warning')} You are using a free version of Sauce Labs with limited concurrency and minutes. ` +
-          `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
-    }
+    await checkUser({sauceUrl, sauceUsername, sauceAccessKey, sauceConcurrency});
 
-    const maxConcurrency = concurrencyLimit.overall;
-    if (maxConcurrency < sauceConcurrency) {
-      log.warn(`${emoji('warning')} You chose a concurrency limit of ${sauceConcurrency} but your account only provides ${maxConcurrency}. ` +
-          `Setting concurrency to ${maxConcurrency}` +
-          `To increase your concurrency visit https://app.saucelabs.com/billing/plans to upgrade your account`);
-      sauceConcurrency = maxConcurrency;
-    }
 
     const workingDir = path.join(process.cwd(), project);
 
@@ -365,7 +349,7 @@ async function run (argv) {
       log.info(`${emoji('white_check_mark')} Done uploading to Application Storage with storage ID ${chalk.blue(storageId)}`);
 
       // Start a SauceConnect tunnel
-      const sauceTunnelData = sauceTunnel ? await startTunnel(SAUCE_USERNAME, SAUCE_ACCESS_KEY, log) : null;
+      const sauceTunnelData = sauceTunnel ? await startTunnel(sauceUsername, sauceAccessKey, log) : null;
       const { tunnelName } = sauceTunnelData;
       scTunnel = sauceTunnelData.scTunnel;
 
@@ -382,8 +366,8 @@ async function run (argv) {
             runJob({
               suite: sauceRunnerJson.suites[currentSuiteIndex],
               tunnelName,
-              sauceUsername: SAUCE_USERNAME,
-              sauceAccessKey: SAUCE_ACCESS_KEY,
+              sauceUsername,
+              sauceAccessKey,
               storageId,
               ciBuildId,
               frameworkVersion: sauceRunnerJson.cypress.version,

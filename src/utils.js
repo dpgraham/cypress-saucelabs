@@ -203,9 +203,33 @@ You passed: '${envPair}'. Must provide a key and value separated by = sign`);
   const cypressFileName = `__$$cypress-saucelabs$$__` + (name ? `${name}__` : '') + '.json';
   const cypressFilePath = path.join(workingDir, cypressFileName);
   fs.writeFileSync(cypressFilePath, JSON.stringify(cypressConfig, null, 2));
-  console.log(cypressFilePath);
   return cypressFilePath;
 }
+
+async function checkUser ({sauceUrl, sauceUsername, log, sauceConcurrency}) {
+  const userUrl = `${sauceUrl}/rest/v1/users/${sauceUsername}`;
+  const user = (await axios.get(userUrl)).data;
+  const { user_type: userType } = user;
+  if (userType === 'free') {
+    log.error(`${emoji('x')} Your Sauce Labs account ${SAUCE_USERNAME} has expired. ` +
+        `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
+  }
+  if (userType === 'free_trial' || userType === 'freemium') {
+    log.info(`${emoji('warning')} You are using a free version of Sauce Labs with limited concurrency and minutes. ` +
+        `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
+  }
+  
+  const maxConcurrency = user?.concurrencyLimit?.overall;
+  if (maxConcurrency < sauceConcurrency) {
+    log.warn(`${emoji('warning')} You chose a concurrency limit of ${sauceConcurrency} but your account only provides ${maxConcurrency}. ` +
+        `Setting concurrency to ${maxConcurrency}` +
+        `To increase your concurrency visit https://app.saucelabs.com/billing/plans to upgrade your account`);
+    sauceConcurrency = maxConcurrency;
+  }
+
+  return user;
+}
+
 
 module.exports = {
   startPrintDots, stopPrintDots,
@@ -213,4 +237,5 @@ module.exports = {
   startTunnel,
   runJob,
   createCypressConfig,
+  checkUser,
 }
