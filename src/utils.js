@@ -6,6 +6,8 @@ const { default: SauceLabs } = require('saucelabs');
 const { uuidV4 } = require('appium-support/build/lib/util');
 const { get:emoji } = require('node-emoji');
 const chalk = require('chalk');
+const axios = require('axios');
+const { retryInterval } = require('asyncbox');
 
 let dotPrintingInterval;
 
@@ -76,8 +78,78 @@ async function startTunnel (username, accessKey, log) {
   }
 }
 
+let loggedBuild = false;
+
+async function runJob ({
+  suite,
+  tunnelName,
+  storageId,
+  sauceUsername,
+  sauceAccessKey,
+  ciBuildId,
+  frameworkVersion,
+  sauceUrl,
+  log,
+}) {
+  const getBuildId = async (jobId) => {
+    const { data: job } = await axios.get(`${sauceUrl}/rest/v1/${sauceUsername}/jobs/${jobId}`);
+    const { build:buildName } = job;
+    const { data: builds } = await axios.get(`${sauceUrl}/rest/v1/${sauceUsername}/builds`, {params: {status: 'running'}});
+    if (builds) {
+      for (const build of builds) {
+        if (build.name === buildName) {
+          return build.id;
+        }
+      }
+    }
+    throw new Error(`Could not find build`);
+  };
+
+  // TODO: Introduce a way to retry job
+  const { name, browser, browserVersion, platformName, screenResolution } = suite;
+  const testComposerBody = {
+    username: sauceUsername,
+    accessKey: sauceAccessKey,
+    browserName: browser,
+    browserVersion,
+    platformName,
+    name,
+    screenResolution,
+    app: `storage:${storageId}`,
+    suite: name,
+    framework: 'cypress',
+    build: ciBuildId,
+    tags: null, // TODO: Tags
+    tunnel: {
+      id: tunnelName,
+    },
+    frameworkVersion,
+  };
+  const response = await axios.post(`${sauceUrl}/v1/testcomposer/jobs`, testComposerBody);
+  const jobId = response.data.jobID;
+  if (!loggedBuild) {
+    loggedBuild = true;
+    const buildId = await retryInterval(5, 5000, async () => getBuildId(jobId));
+    if (buildId) {
+      log.info(`${emoji('information_source')}  To view your suites, visit ${chalk.blue(`https://app.saucelabs.com/builds/vdc/${buildId}`)}`);
+    }
+    startPrintDots();
+  }
+
+  // TODO: Add a timeout option (right now it's just 30 minutes);
+  const passed = await retryInterval(4 * 30, 15000, async function () {
+    const resp = await axios.get(`${sauceUrl}/rest/v1/${sauceUsername}/jobs/${jobId}`);
+    if (resp.data.status !== 'complete') {
+      throw new Error('not done yet');
+    }
+    return resp.data.passed;
+  });
+  return passed;
+}
+
 module.exports = {
   startPrintDots, stopPrintDots,
   createProjectZip,
   startTunnel,
+  runJob,
 }

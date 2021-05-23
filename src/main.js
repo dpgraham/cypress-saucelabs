@@ -4,11 +4,10 @@ const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');
 const fs = require('fs');
 const FormData = require('form-data');
-const { retryInterval } = require('asyncbox');
 const { logger } = require('appium-support');
 const { get:emoji } = require('node-emoji');
 const chalk = require('chalk');
-const { startPrintDots, stopPrintDots, createProjectZip, startTunnel } = require('./utils');
+const { startPrintDots, stopPrintDots, createProjectZip, startTunnel, runJob } = require('./utils');
 
 const defaultCypressVersion = require('../package.json').version;
 const { default: axios } = require('axios');
@@ -426,66 +425,6 @@ async function run (argv) {
       const { tunnelName } = sauceTunnelData;
       scTunnel = sauceTunnelData.scTunnel;
 
-      const getBuildId = async (jobId) => {
-        const { data: job } = await axios.get(`${sauceUrl}/rest/v1/${SAUCE_USERNAME}/jobs/${jobId}`);
-        const buildName = job.build;
-        const { data: builds } = await axios.get(`${sauceUrl}/rest/v1/${SAUCE_USERNAME}/builds`, {params: {status: 'running'}});
-        if (builds) {
-          for (const build of builds) {
-            if (build.name === buildName) {
-              return build.id;
-            }
-          }
-        }
-        throw new Error(`Could not find build`);
-      };
-
-      let loggedBuild = false;
-
-      // Run the tests via testcomposer
-      const runJob = async (suite) => {
-        // TODO: Introduce a way to retry job
-        const { name, browser, browserVersion, platformName, screenResolution } = suite;
-        const testComposerBody = {
-          username: sauceUsername,
-          accessKey: sauceAccessKey,
-          browserName: browser,
-          browserVersion,
-          platformName,
-          name,
-          screenResolution,
-          app: `storage:${storageId}`,
-          suite: name,
-          framework: 'cypress',
-          build: ciBuildId,
-          tags: null, // TODO: Tags
-          tunnel: {
-            id: tunnelName,
-          },
-          frameworkVersion: sauceRunnerJson.cypress.version,
-        };
-        const response = await axios.post(`${sauceUrl}/v1/testcomposer/jobs`, testComposerBody);
-        const jobId = response.data.jobID;
-        if (!loggedBuild) {
-          loggedBuild = true;
-          const buildId = await retryInterval(5, 5000, async () => getBuildId(jobId));
-          if (buildId) {
-            log.info(`${emoji('information_source')}  To view your suites, visit ${chalk.blue(`https://app.saucelabs.com/builds/vdc/${buildId}`)}`);
-          }
-          startPrintDots();
-        }
-
-        // TODO: Add a timeout option (right now it's just 30 minutes);
-        const passed = await retryInterval(4 * 30, 15000, async function () {
-          const resp = await axios.get(`${sauceUrl}/rest/v1/${SAUCE_USERNAME}/jobs/${jobId}`);
-          if (resp.data.status !== 'complete') {
-            throw new Error('not done yet');
-          }
-          return resp.data.passed;
-        });
-        return passed;
-      };
-
       let currentSuiteIndex = 0;
       let runningJobs = 0;
       const runAllJobsPromise = new Promise((resolve, reject) => {
@@ -496,20 +435,29 @@ async function run (argv) {
               return;
             }
             runningJobs++;
-            runJob(sauceRunnerJson.suites[currentSuiteIndex])
-                .then(function (passed) {
-                  if (!passed) {
-                    // TODO: Make a parameter to allow user to just continue until all are done
-                    reject(`Your suites did not pass`);
-                    return;
-                  }
-                  runningJobs--;
-                  runInterval();
-                })
-                .catch(function (reason) {
-                  // TODO: Make a parameter to allow user to just continue until all are done
-                  reject(`Your suites errored: ${reason}`);
-                });
+            runJob({
+              suite: sauceRunnerJson.suites[currentSuiteIndex],
+              tunnelName,
+              sauceUsername: SAUCE_USERNAME,
+              sauceAccessKey: SAUCE_ACCESS_KEY,
+              storageId,
+              ciBuildId,
+              frameworkVersion: sauceRunnerJson.cypress.version,
+              sauceUrl,
+              log,
+            }).then(function (passed) {
+              if (!passed) {
+                // TODO: Make a parameter to allow user to just continue until all are done
+                reject(`Your suites did not pass`);
+                return;
+              }
+              runningJobs--;
+              runInterval();
+            })
+            .catch(function (reason) {
+              // TODO: Make a parameter to allow user to just continue until all are done
+              reject(`Your suites errored: ${reason}`);
+            });
             currentSuiteIndex++;
           }
         }
