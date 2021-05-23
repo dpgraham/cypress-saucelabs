@@ -2,6 +2,10 @@ const ignore = require('ignore');
 const AdmZip = require('adm-zip');
 const fs = require('fs');
 const path = require('path');
+const { default: SauceLabs } = require('saucelabs');
+const { uuidV4 } = require('appium-support/build/lib/util');
+const { get:emoji } = require('node-emoji');
+const chalk = require('chalk');
 
 let dotPrintingInterval;
 
@@ -50,7 +54,30 @@ function createProjectZip (zipFileOut, workingDir) {
   zip.writeZip(zipFileOut);
 }
 
+async function startTunnel (username, accessKey, log) {
+  let tunnelName;
+  const myAccount = new SauceLabs({user: username, key: accessKey});
+  const scLogs = [];
+  log.info(`${emoji('rocket')} Starting a SauceConnect tunnel`);
+  tunnelName = uuidV4();
+  try {
+    const scTunnel = await myAccount.startSauceConnect({
+      logger: (stdout) => {
+        scLogs.push(stdout);
+      },
+      tunnelIdentifier: tunnelName,
+      // TODO: Let user set other SauceConnect parameters
+    });
+    log.info(`${emoji('white_check_mark')} Started SauceConnect tunnel successfully with tunnel ID ${chalk.blue(tunnelName)}`);
+    return {tunnelName, scTunnel};
+  } catch (e) {
+    log.info(scLogs.join('\n'));
+    log.errorAndThrow('Failed to start tunnel', e);
+  }
+}
+
 module.exports = {
   startPrintDots, stopPrintDots,
   createProjectZip,
+  startTunnel,
 }

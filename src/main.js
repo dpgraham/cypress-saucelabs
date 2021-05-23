@@ -8,12 +8,10 @@ const { retryInterval } = require('asyncbox');
 const { logger } = require('appium-support');
 const { get:emoji } = require('node-emoji');
 const chalk = require('chalk');
-const { startPrintDots, stopPrintDots, createProjectZip } = require('./utils');
+const { startPrintDots, stopPrintDots, createProjectZip, startTunnel } = require('./utils');
 
 const defaultCypressVersion = require('../package.json').version;
 const { default: axios } = require('axios');
-const { default: SauceLabs } = require('saucelabs');
-const { uuidV4 } = require('appium-support/build/lib/util');
 
 const log = logger.getLogger();
 
@@ -423,26 +421,10 @@ async function run (argv) {
       const {id: storageId} = upload.data.item;
       log.info(`${emoji('white_check_mark')} Done uploading to Application Storage with storage ID ${chalk.blue(storageId)}`);
 
-      let tunnelName;
-      if (sauceTunnel) {
-        const myAccount = new SauceLabs({user: SAUCE_USERNAME, key: SAUCE_ACCESS_KEY});
-        const scLogs = [];
-        log.info(`${emoji('rocket')} Starting a SauceConnect tunnel`);
-        tunnelName = uuidV4();
-        try {
-          scTunnel = await myAccount.startSauceConnect({
-            logger: (stdout) => {
-              scLogs.push(stdout);
-            },
-            tunnelIdentifier: tunnelName,
-            // TODO: Let user set other SauceConnect parameters
-          });
-          log.info(`${emoji('white_check_mark')} Started SauceConnect tunnel successfully with tunnel ID ${chalk.blue(tunnelName)}`);
-        } catch (e) {
-          log.info(scLogs.join('\n'));
-          log.errorAndThrow('Failed to start tunnel', e);
-        }
-      }
+      // Start a SauceConnect tunnel
+      const sauceTunnelData = sauceTunnel ? await startTunnel(SAUCE_USERNAME, SAUCE_ACCESS_KEY, log) : null;
+      const { tunnelName } = sauceTunnelData;
+      scTunnel = sauceTunnelData.scTunnel;
 
       const getBuildId = async (jobId) => {
         const { data: job } = await axios.get(`${sauceUrl}/rest/v1/${SAUCE_USERNAME}/jobs/${jobId}`);
