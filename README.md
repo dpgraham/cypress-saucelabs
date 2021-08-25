@@ -1,6 +1,6 @@
 # cypress-saucelabs
 
-Run your Cypress scripts in the Sauce Labs Cloud and take advantage of Sauce Labs many browsers and platforms to run your Cypress tests on.
+Run your Cypress scripts in the Sauce Labs Cloud and take advantage of Sauce Labs many browsers and platforms to run your Cypress tests in parallel on.
 
 ## Pre-requisites
 You already have Cypress tests set up.
