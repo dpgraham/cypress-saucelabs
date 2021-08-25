@@ -7,3 +7,4 @@ __assets__
 __$$cypress-saucelabs$$__*
 eamples/local/cypress/videos/
 cypress/videos/*
+coverage/

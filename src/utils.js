@@ -23,7 +23,7 @@ function stopPrintDots () {
   clearInterval(dotPrintingInterval);
 }
 
-function createProjectZip (zipFileOut, workingDir) {
+function createProjectZip ({zipFileOut, workingDir, log}) {
   startPrintDots();
   const sauceIgnoreDir = path.join(workingDir, '.sauceignore');
   if (!fs.existsSync(sauceIgnoreDir)) {

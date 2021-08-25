@@ -305,7 +305,7 @@ async function run (argv) {
       // Zip the project
       log.info(`${emoji('package')} Bundling contents of ${chalk.blue(workingDir)} to zip file`);
       const zipFileOut = path.join(workingDir, '__$$cypress-saucelabs$$__.zip');
-      await createProjectZip(zipFileOut, workingDir);
+      await createProjectZip({zipFileOut, workingDir, log});
       log.info(`${emoji('white_check_mark')} Wrote zip file to '${chalk.blue(path.join(workingDir, zipFileOut))}'`);
 
       // Upload the zip file to Application Storage
@@ -340,7 +340,7 @@ async function run (argv) {
   }
 }
 
-// TODO: Add Jest unit test
+// TODO: Add Jest unit test and linting
 // TODO: Add Jest E2E test
 // TODO: Add publishing script
 // TODO: Add GitHub Actions
