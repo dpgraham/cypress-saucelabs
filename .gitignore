@@ -8,3 +8,4 @@ __$$cypress-saucelabs$$__*
 eamples/local/cypress/videos/
 cypress/videos/*
 coverage/
+cypress-renamed.json

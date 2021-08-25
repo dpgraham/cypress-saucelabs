@@ -107,7 +107,7 @@ async function runJob ({
         }
       }
     }
-    throw new Error(`Could not find build`);
+    throw new Error(`Could not find build for ${jobId}`);
   };
 
   // TODO: Introduce a way to retry job
@@ -134,7 +134,7 @@ async function runJob ({
   const jobId = response.data.jobID;
   if (!loggedBuild) {
     loggedBuild = true;
-    const buildId = await retryInterval(5, 5000, async () => getBuildId(jobId));
+    const buildId = await retryInterval(20, 5000, async () => getBuildId(jobId));
     if (buildId) {
       startPrintDots();
       log.info(`${emoji('information_source')}  To view your suites, visit ${chalk.blue(`https://app.saucelabs.com/builds/vdc/${buildId}`)}`);
@@ -224,7 +224,7 @@ async function checkUser ({sauceUrl, sauceUsername, log, sauceConcurrency}) {
         `Visit https://app.saucelabs.com/billing/plans to upgrade your plan`);
   }
   
-  const maxConcurrency = user?.concurrencyLimit?.overall;
+  const maxConcurrency = user && user.concurrencyLimit && user.concurrencyLimit.overall;
   if (maxConcurrency < sauceConcurrency) {
     log.warn(`${emoji('warning')} You chose a concurrency limit of ${sauceConcurrency} but your account only provides ${maxConcurrency}. ` +
         `Setting concurrency to ${maxConcurrency}` +
