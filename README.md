@@ -57,4 +57,4 @@ cypress-saucelabs --sauce-access-key <YOUR_ACCESS_KEY>
 
 ## Development
 
-Try it locally by running `node . --browser "microsoftedge:latest:Windows 10:800x600,chrome" --config foo=bar --project examples/local --tunnel`
+Try it locally by running `node . --browser "microsoftedge:latest:Windows 10:800x600,chrome"`
