@@ -8,7 +8,7 @@ You already have Cypress tests set up.
 See https://docs.cypress.io/guides/getting-started/installing-cypress to get started with Cypress.
 
 ## Getting Started
-* Register an account at saucelabs.com/sign-up
+* Register an account at https://saucelabs.com/sign-up
 * Copy your Sauce access key from https://app.saucelabs.com/user-settings (remember to keep this a secret)
 * Run your Cypress tests on the Sauce Labs cloud
 
