@@ -228,6 +228,7 @@ async function run (argv) {
         if (os && os.toLowerCase().startsWith('mac')) {
           log.error(`Platform '${os}' is not supported in Sauce Cloud. ` +
               `If you'd like to see this, request it at https://saucelabs.ideas.aha.io/`);
+          return;
         }
         suite.browser = [
           browserName,
