@@ -1,0 +1,61 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`utils .createProjectZip should do something 1`] = `
+Array [
+  Array [
+    Array [
+      "/root/a",
+      ".",
+      "a",
+    ],
+    Array [
+      "/root/b/c",
+      "b",
+      "c",
+    ],
+  ],
+  [MockFunction] {
+    "calls": Array [
+      Array [
+        "/path/to/zip",
+      ],
+    ],
+    "results": Array [
+      Object {
+        "type": "return",
+        "value": undefined,
+      },
+    ],
+  },
+]
+`;
+
+exports[`utils .createProjectZip should send non-ignored files to a zip entry 1`] = `
+Array [
+  Array [
+    Array [
+      "/root/a",
+      ".",
+      "a",
+    ],
+    Array [
+      "/root/b/c",
+      "b",
+      "c",
+    ],
+  ],
+  [MockFunction] {
+    "calls": Array [
+      Array [
+        "/path/to/zip",
+      ],
+    ],
+    "results": Array [
+      Object {
+        "type": "return",
+        "value": undefined,
+      },
+    ],
+  },
+]
+`;
