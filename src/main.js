@@ -6,7 +6,8 @@ const fs = require('fs');
 const { logger } = require('appium-support');
 const { get:emoji } = require('node-emoji');
 const chalk = require('chalk');
-const { createProjectZip, startTunnel, createCypressConfig, checkUser, uploadZipToApplicationStorage, runAllJobs, getSauceConfig, getSauceUrl } = require('./utils');
+const { createProjectZip, startTunnel, checkUser, uploadZipToApplicationStorage, runAllJobs, getSauceConfig, getSauceUrl } = require('./utils');
+const { promise:glob } = require('glob-promise');
 
 const defaultCypressVersion = require('../package.json').version;
 
@@ -25,7 +26,7 @@ Runs Cypress tests in the Sauce Labs cloud
         description: 'your Sauce Labs username. you can omit this if you set a SAUCE_USERNAME environment variable'
       })
       .option('sauce-access-key', {
-        alias: 'a',
+        alias: 'k',
         type: 'string',
         description: 'your Sauce Labs access key. you can omit this if you set a SAUCE_ACCESS_KEY environment variable',
       })
@@ -34,6 +35,7 @@ Runs Cypress tests in the Sauce Labs cloud
         description: `run your Cypress test locally and send the results to Sauce Labs`,
       })
       .option('sauce-cypress-version', {
+        alias: ['cypress-version', 'cypress'],
         type: 'string',
         description: `version of Cypress to run in cloud. Default is ${defaultCypressVersion}`
       })
@@ -54,18 +56,18 @@ Runs Cypress tests in the Sauce Labs cloud
       })
       .option('sauce-config', {
         type: 'string',
-        description: `a js or json file that can be used to define a group of jobs`,
+        description: `a js or json file that defines a group of jobs`,
       })
       .option('browser', {
         alias: 'b',
         type: 'string',
-        description: `a comma-separted list of Sauce Labs browsers to run your Cypress tests on.
+        description: `a comma-separated list of Sauce Labs browsers to run your Cypress tests on.
 
         Each browser has the format "<browserName>:<browserVersion>:<operatingSystem>:<screenResolution>". 
 
         'browserName' is the only required field
 
-        example: "--browsers chrome, firefox:78:windows , edge:latest:windows:1920x1078"`
+        example: "--browsers chrome,firefox:78:windows,edge:latest:windows:1920x1078"`
       })
       .option('ci-build-id', {
         type: 'string',
@@ -93,23 +95,11 @@ Runs Cypress tests in the Sauce Labs cloud
       .option('key', {
         alias: 'k',
         type: 'string',
-        description: `your secret Record Key. you can omit this if you set a CYPRESS_RECORD_KEY environment variable.`,
-      })
-      .option('headed', {
-        type: 'boolean',
-        description: `displays the browser instead of running headlessly (defaults to true for Firefox and Chromium-family browsers)`,
+        description: `your secret Record Key.`,
       })
       .option('headless', {
         type: 'boolean',
         description: `hide the browser instead of running headed (defaults to true for Electron)`,
-      })
-      .option('no-exit', {
-        type: 'string',
-        description: `keep the browser open after tests finish`,
-      })
-      .option('parallel', {
-        type: 'string',
-        description: `enables concurrent runs and automatic load balancing of specs across multiple machines or processes`,
       })
       .option('port', {
         alias: 'p',
@@ -129,16 +119,6 @@ Runs Cypress tests in the Sauce Labs cloud
       .option('record', {
         type: 'boolean',
         description: `records the run. sends test results, screenshots and videos to your Cypress Dashboard.`,
-      })
-      .option('reporter', {
-        alias: 'r',
-        type: 'string',
-        description: `setruns a specific mocha reporter. pass a path to use a custom reporter. defaults to "spec"`,
-      })
-      .option('reporter-options', {
-        alias: 'o',
-        type: 'string',
-        description: `options for the mocha reporter. defaults to "null"`,
       })
       .option('spec', {
         alias: 's',
@@ -211,7 +191,7 @@ async function run (argv) {
     // const supportedBrowsers = axios.get(`${sauceUrl}/rest/v1/info/platforms/all?resolutions=true`);
     const suiteList = [];
     const entries = sauceConfiguration ? Object.entries(sauceConfiguration) : [[null, null]];
-    for (let [name, conf] of entries) {
+    for (let [, conf] of entries) {
       conf = {
         browser,
         project,
@@ -237,21 +217,47 @@ async function run (argv) {
           screenResolution,
         ];
 
-        // GENERATE CYPRESS CONFIG
-        suite.configFile = await createCypressConfig({conf, workingDir, log, name});
-        suiteList.push(suite);
+        // TODO: Check conf exists before requiring it
+        const cypressConfig = require(path.join(process.cwd(), conf.configFile))
+        const integrationFolder = cypressConfig.integrationFolder || 'cypress/integration';
+        const testFiles = cypressConfig.testFiles || '**/*.*';
+          path.join(process.cwd(), 'cypress', 'integration');
+        const testFileGlob = path.join(process.cwd(), integrationFolder, testFiles);
+        for (const testFile of (await glob(testFileGlob)).reverse()) {
+          suiteList.push({
+            ...suite,
+            config: {
+              testFiles: path.relative(path.join(process.cwd(), integrationFolder), testFile),
+            }
+          });
+        }
       }
 
       // TODO: Add a flag to set pre-existing tunnelId.... check open tunnels before running tests
-      if (!sauceTunnel && cypressConfig.baseUrl && cypressConfig.baseUrl.includes('localhost')) {
+      /*if (!sauceTunnel && cypressConfig.baseUrl && cypressConfig.baseUrl.includes('localhost')) {
         log.info(`${emoji('information_source')} Looks like you're running on localhost '${cypressConfig.baseUrl}'. ` +
           `To allow Sauce Labs VM's to access your localhost, set '--sauce-tunnel true' in your command line arguments`);
-      }
+      }*/
     }
 
     if (!ciBuildId) {
       // TODO: Auto-detect the CI build ID
       ciBuildId = `Cypress Build -- ${+new Date()}`;
+    }
+
+    function generateJobName ({browserName, browserVersion, os, screenResolution, config}) {
+      let jobName = '';
+      if (os) {
+        jobName += `${os} - `;
+      }
+      if (browserName && browserName != '') {
+        jobName += `${browserName}${browserVersion ? '@' + browserVersion : ''} - `;
+      }
+      if (screenResolution) {
+        jobName += `${screenResolution} - `;
+      }
+      jobName += config.testFiles;
+      return jobName;
     }
 
     // Create "sauce-runner.json"
@@ -270,17 +276,17 @@ async function run (argv) {
         region: 'us-west-1', // TODO: Let user decide region here
       },
       cypress: {
-        configFile: path.relative(workingDir, suiteList[0].configFile), // TODO: This will be replaced once ship new Cypress Runner
+        configFile,
         version: sauceCypressVersion || defaultCypressVersion,
       },
-      suites: suiteList.map(({browser: [browserName, browserVersion, os, screenResolution], configFile}, index) => ({
-        name: `SUITE ${index + 1} of ${suiteList.length}: ${browserName} -- ${browserVersion || 'latest'} -- ${os}` + (screenResolution ? ` -- ${screenResolution}` : ''),
+      suites: suiteList.map(({browser: [browserName, browserVersion, os, screenResolution], config}, index) => ({
+        //name: generateJobName({browserName, browserVersion, os, screenResolution, config}),
+        name: config.testFiles,
         browser: browserName,
         browserVersion,
         platformName: os,
         screenResolution,
-        config: {},
-        configFile, // TODO: Put in a PR to make this one be supported by sauce-cypress-runner
+        config,
       })),
     };
     fs.writeFileSync(path.join(workingDir, 'sauce-runner.json'), JSON.stringify(sauceRunnerJson, null, 2));
@@ -307,15 +313,18 @@ async function run (argv) {
       log.info(`${emoji('package')} Bundling contents of ${chalk.blue(workingDir)} to zip file`);
       const zipFileOut = path.join(workingDir, '__$$cypress-saucelabs$$__.zip');
       await createProjectZip({zipFileOut, workingDir, log});
-      log.info(`${emoji('white_check_mark')} Wrote zip file to '${chalk.blue(path.join(workingDir, zipFileOut))}'`);
+      log.info(`${emoji('white_check_mark')} Wrote zip file to '${chalk.blue(zipFileOut)}'`);
 
       // Upload the zip file to Application Storage
       const storageId = await uploadZipToApplicationStorage({zipFileOut, log, sauceUrl});
 
       // Start a SauceConnect tunnel
-      const sauceTunnelData = sauceTunnel ? await startTunnel(sauceUsername, sauceAccessKey, log) : null;
-      const { tunnelName } = sauceTunnelData;
-      scTunnel = sauceTunnelData.scTunnel;
+      let tunnelName
+      if (sauceTunnel) {
+        const sauceTunnelData = await startTunnel(sauceUsername, sauceAccessKey, log);
+        tunnelName = sauceTunnelData.tunnelName;
+        scTunnel = sauceTunnelData.scTunnel;
+      }
 
       // Run all of the jobs now
       await runAllJobs({

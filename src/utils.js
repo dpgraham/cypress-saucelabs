@@ -274,30 +274,32 @@ async function runAllJobs ({
           return;
         }
         runningJobs++;
-        runJob({
-          suite: sauceRunnerJson.suites[currentSuiteIndex],
-          tunnelName,
-          sauceUsername,
-          sauceAccessKey,
-          storageId,
-          ciBuildId,
-          frameworkVersion: sauceRunnerJson.cypress.version,
-          sauceUrl,
-          log
-        }).then(function (passed) {
-          if (!passed) {
+        setTimeout(function () {
+          runJob({
+            suite: sauceRunnerJson.suites[currentSuiteIndex],
+            tunnelName,
+            sauceUsername,
+            sauceAccessKey,
+            storageId,
+            ciBuildId,
+            frameworkVersion: sauceRunnerJson.cypress.version,
+            sauceUrl,
+            log
+          }).then(function (passed) {
+            if (!passed) {
+              // TODO: Make a parameter to allow user to just continue until all are done
+              reject(`Your suites did not pass`);
+              return;
+            }
+            runningJobs--;
+            runInterval();
+          })
+          .catch(function (reason) {
             // TODO: Make a parameter to allow user to just continue until all are done
-            reject(`Your suites did not pass`);
-            return;
-          }
-          runningJobs--;
-          runInterval();
-        })
-        .catch(function (reason) {
-          // TODO: Make a parameter to allow user to just continue until all are done
-          reject(`Your suites errored: ${reason}`);
-        });
-        currentSuiteIndex++;
+            reject(`Your suites errored: ${reason}`);
+          });
+          currentSuiteIndex++;
+        }, 1000)
       }
     }
     runInterval();
